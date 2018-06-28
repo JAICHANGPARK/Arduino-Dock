@@ -1,0 +1,62 @@
+IOS has several important points, so I hope you can look at this document before using the module ! Learning by heart.
+
+(suitable for Apple 4s/ 5/ 5s)
+
+IOS usage:
+
+1.IOS search for Bluetooth, not in Settings -¡·Bluetooth search and pairing Bluetooth. (IOS settings can only connect Bluetooth headset. Can not find the wireless data device)
+
+2.IOS search for LightBlue software in Appstore, and then open the LightBlue software to search for HM-10, to pair and to test send and receive!
+
+---------------------------------------------
+
+Android phone
+
+1. First, confirm whether the Bluetooth module on Android mobile phone supports Bluetooth 4.0 (if not supporting, the software does not work properly!)
+
+2. System is upgraded to 4.3 or later
+
+3. HMBLEComAssistant.rar inside data package can be used to test the transceiver
+
+------------------------------------------------
+
+PS: to develop IOS or Android phones terminal. Please visit http://www.jnhuamao.cn/download.asp?ID=0  to download the latest source code for reference!
+
+-------------- For HM-10 module configuration, you need USB to TTL device. Not wireless pairing is configured! (Because wireless pairing, the data directly through the transmission)
+
+1. The LED flashes slowly when it is not paired with the remote device. At this time, you can use the AT command to configure the module.
+
+2.HM-10 module can only recognize all uppercase AT command, does not support lowercase or mixture of uppercase and lowercase.
+
+3. The factory default baud rate is 9600 8n1
+
+
+
+Slave settings:
+
+
+AT+BAUD0		//9600 set well then restart to take effect.
+
+AT+NAMEAC
+
+AT+PASS000000    //input full 6-bit
+
+AT+TYPE1
+
+AT+ROLE0
+
+
+
+Master setting:
+
+
+AT+BAUD0		//9600 set well then restart to take effect.
+
+AT+NAMEAC
+
+AT+PASS000000    //input full 6-bit
+
+AT+TYPE1
+
+AT+ROLE1
+
