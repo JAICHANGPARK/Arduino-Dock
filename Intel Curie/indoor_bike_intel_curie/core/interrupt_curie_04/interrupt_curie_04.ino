@@ -40,7 +40,6 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define BASE_ADDRESS              0x001000
 #define SAVE_UNIT_STEP            16
 
-
 #define COMMAND_WRITE_ENABLE      (byte) 0x06
 #define COMMAND_RANDOM_READ       (byte)0x03
 #define COMMAND_FAST_READ         (byte)0x0B
@@ -59,6 +58,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define SR1_WEN_MASK              0x02
 #define CMD_PAGEPROG              0x02
 
+#define BLE_LED_INDICATOR_PIN         4
 
 
 BLEService heartRateService("180D"); // BLE Battery Service
@@ -72,6 +72,8 @@ BLEService dateTimeService("AAA0");
 BLECharacteristic dateTimeSyncChar("0001", BLERead | BLEWrite , 20);
 //BLECharacteristic dateChar("AAA1", BLERead | BLEWrite , 20);
 //BLECharacteristic timeChar("AAA2", BLERead | BLEWrite , 20);
+BLECharacteristic datetimeChar("0002", BLERead | BLEWrite , 20);
+
 
 BLEService userAuthService("EEE0");
 BLECharacteristic authChar("EEE1", BLERead | BLEWrite , 20);
@@ -113,6 +115,9 @@ volatile long startFitnessTime = 0;
 volatile long endFitnessTime = 0;
 volatile long workoutTime = 0;
 
+// 시리얼 플레시 메모리
+const int chipSelectPin = 10;
+int device_id, addr, data, i = 0;
 uint8_t page[256];
 uint8_t buf[256] = {0,};
 uint8_t init_buff[16] = {0,};
@@ -123,13 +128,20 @@ uint16_t register_index = 0;  // 저장 인덱스 총괄
 uint32_t base_address = 0;
 uint32_t now_address = 0;
 
-const int chipSelectPin = 10;
-int device_id, addr, data, i = 0;
-
 volatile uint16_t uintDistanceKm = 0;
 volatile uint32_t sumDistanceKm = 0x0000;  // 평균을 구하기 위한 이동거리 변수 ( 더 해짐)
 volatile uint32_t sumSpeed = 0x0000;  // 평균 속도를 구하기 위한 속도 합 변수 (더 해짐)
 volatile uint32_t sumHeartRate = 0;   // 평균 심박수를 구하기 위한 변수
+
+//심박수 처리
+uint8_t globalHeartRate = 0; // 심박수 전역 변수
+uint16_t heartRateCount = 0; // 심박수 평균을 구하기위한 계수 카운터 변수
+boolean heartRateMeasureFlag = false; // 심박 센서 착용여부 플레그
+boolean heartRateLocationFlag = false; // 심박 센서 위치 확인플레그
+
+boolean bleDateTimeSycnFlag = false; // 블루투스를 통해 시간 동기화가 되었을시 처리하는 플래그
+boolean bleAuthCheckFlag = false; // 사용자 인증을 위한 플래그 실패시 false 성공시 true
+boolean bleDataSyncFlag = false; // 데이터 전송 요청 이 들어왔을겨우 올바른 데이터 형식이면 true 아니면 false
 
 void init_read_from_flash() {
   allMemoryErase();
@@ -187,6 +199,7 @@ void bleProfileSetUp() {
 
   BLE.setAdvertisedService(dateTimeService);
   dateTimeService.addCharacteristic(dateTimeSyncChar);
+  dateTimeService.addCharacteristic(datetimeChar);
 
   BLE.setAdvertisedService(userAuthService);
   userAuthService.addCharacteristic(authChar);
@@ -197,9 +210,9 @@ void bleProfileSetUp() {
 
   BLE.addService(heartRateService);   // Add the BLE Heart Rate service
   BLE.addService(fitnessMachineService);   // Add the BLE Indore Bike service
-  BLE.addService(dateTimeService);
-  BLE.addService(userAuthService);
-  BLE.addService(dataSyncService);
+  BLE.addService(dateTimeService);  // 시간 동기화를 위한 서비스 추가
+  BLE.addService(userAuthService);  // 사용자 인증을 위한 서비스 추가 
+  BLE.addService(dataSyncService);  // 데이터 동기화를 위한 서비스 추가 
 
 }
 
@@ -264,16 +277,50 @@ void displayPhaseThird() {
   display.display();
 }
 
+void displayPhaseFour() {
+  display.clearDisplay();
+  // text display tests
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("HeartRate");
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+
+  //  boolean heartRateMeasureFlag = false;
+  //  boolean heartRateLocationFlag = false;
+  String message = "";
+  if (!heartRateMeasureFlag && !heartRateLocationFlag) {
+    message = "E400";
+  }
+  else if (heartRateMeasureFlag && !heartRateLocationFlag) {
+    message = "E401";
+  } else if (heartRateMeasureFlag && heartRateLocationFlag) {
+    message = String(globalHeartRate) + " bpm";
+  }
+  display.println(message);
+  display.display();
+
+}
+
+
 #endif
 
+/**
+
+   프로그램 초기화 1회 실행 - 박제창
+
+*/
 void setup() {
+
   // put your setup code here, to run once:
 #ifdef DEBUG
   Serial.begin(115200);
 #endif
   Wire.begin();
-  pinMode(LED_BUILTIN, OUTPUT);
+  //  pinMode(LED_BUILTIN, OUTPUT);  -- 13번 핀 사용중이기 때문에 수정
   attachInterrupt(2, interrupt_func, FALLING);
+  pinMode(BLE_LED_INDICATOR_PIN, OUTPUT);
 
   AES.Initialize(aes_iv, aes_key);
 
@@ -294,8 +341,6 @@ void setup() {
   //  init_read_from_flash();
 
   //    sectorErase(INFO_ADDRESS);
-
-
 
   //  n =  N25Q256_read(INFO_ADDRESS, init_buff, 16);
   init_buff[0] = normalRead(INFO_ADDRESS);
@@ -352,9 +397,8 @@ void setup() {
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
   dateTimeSyncChar.setEventHandler(BLEWritten, datatimeSyncCharacteristicWritten);
   authChar.setEventHandler(BLEWritten, authCharCharacteristicWritten);
-
+  controlChar.setEventHandler(BLEWritten, dataSyncCharCharacteristicWritten);
   BLE.advertise(); // start advertising
-
 
 }
 
@@ -391,21 +435,23 @@ void loop() {
 
       }
     }
+
+#ifdef DEBUG
     //todo : 연결 되면 보내지는 테스트 패킷
     uint8_t p1 = 0;
     uint8_t testPacket[] = {0x07, 0xe2, 0x09, 0x02, 0x0d, 0x2d, p1};
-    syncChar.setValue(testPacket, 7);
+    //    syncChar.setValue(testPacket, 7);
     p1++;
+#endif
   }
 
   // 블루투스 연결되어 있지 않은 상태에서 운동 중일 때 처리
   if (fitnessStartOrEndFlag) {
 #ifdef USE_OLED
-    int displayPhaseCounter = count % 3 ;
+    int displayPhaseCounter = count % 4 ;
 #endif
 
     long realTimeCurrentTimeMillis = millis();  // 현재 시스템 시간을 가져온다.
-
     // 운동 중이면서 만약 3초동안 인터럽트 발생이 없다면 실시간 운동 변수 초기화
     if (realTimeCurrentTimeMillis - t > REAL_TIME_STOP_MILLIS) {
       InstantTime = 0;
@@ -416,6 +462,28 @@ void loop() {
 #endif
     } else {
       // 운동 중이면서 3초 이내로 인터럽트가 발생한다면 실시간 운동 변수 표기
+
+      //checkHeartRateInWorkout();
+      unsigned char hr_realtime = readHeartRate(HR_ADDR);
+      //    uint16_t heartRateCount = 0;
+      //boolean heartRateMeasureFlag = false;
+      //boolean heartRateLocationFlag = false;
+      if (hr_realtime == 0) {
+        heartRateMeasureFlag = false;
+        heartRateLocationFlag = false;
+      } else if (hr_realtime > 0 && hr_realtime < 60) {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = false;
+      } else {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = true;
+        globalHeartRate = hr_realtime;
+        // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행 --> 운동 종료시 초기화 될 변수
+        heartRateCount++;
+        sumHeartRate += globalHeartRate;
+      }
+
+      delay(100);
 
 #ifdef DEBUG
       Serial.print("count -> "); Serial.print(count); Serial.print("| instant Time  -> "); Serial.print(InstantTime);
@@ -434,6 +502,9 @@ void loop() {
           break;
         case 2:
           displayPhaseThird();
+          break;
+        case 3:
+          displayPhaseFour();
           break;
       }
 #endif
@@ -458,9 +529,9 @@ void loop() {
       uint16_t saveWorkoutTime = (uint16_t)tmp_time; //운동 시간 변수
       // 이동 거리는 --> uintDistanceKm 변수 사용
 
-      uint8_t meanHeartRate = 0;
-
+      uint8_t meanHeartRate =  (uint8_t) (sumHeartRate / heartRateCount);
       uint32_t saveAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * register_index);
+      uint16_t meanKcal = 0;
 
       // 저장 정보 주소 정보 읽기
       printData(INFO_ADDRESS);
@@ -471,10 +542,10 @@ void loop() {
       //서브섹터 삭제하기
       writeEnable();
       subSectorErase(INFO_ADDRESS);
-
+#ifdef DEBUG
       Serial.print("sr check: " ); Serial.println(readStatusRegister());
       Serial.println("after the subsector is erased");
-
+#endif
       waitForWrite();
       delay(100);
       //삭제 섹터 확인
@@ -484,10 +555,10 @@ void loop() {
       printData(INFO_ADDRESS + 3);
       printData(INFO_ADDRESS + 4);
 
-
       //      writePage(page, BASE_ADDRESS);
       int buffCount = 0;
-      uint8_t save_info_index[6];
+      uint8_t save_info_index[6];  // 인덱스 저장을 위한 버퍼
+      uint8_t fitnessDataBuff[16]; // 운동정보 저장을 위한 버퍼
       save_info_index[buffCount++] = (uint8_t)((register_index >> 8) & 0xff);
       save_info_index[buffCount++] = (uint8_t)(register_index & 0xff);
       save_info_index[buffCount++] =  (uint8_t)((saveAddress >> 24) & 0xff);
@@ -496,21 +567,40 @@ void loop() {
       save_info_index[buffCount++] = (uint8_t)(saveAddress & 0xff);
       writeEnable();
       writeInfoIndex(save_info_index, INFO_ADDRESS);
+      buffCount = 0;
 
+      fitnessDataBuff[buffCount++] = (uint8_t)((register_index >> 8) & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)(register_index & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)((saveYear >> 8) & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)(saveYear & 0xff);
+      fitnessDataBuff[buffCount++] = saveMonth & 0xff;
+      fitnessDataBuff[buffCount++] = saveDay & 0xff;
+      fitnessDataBuff[buffCount++] = saveHour & 0xff;
+      fitnessDataBuff[buffCount++] = saveMin & 0xff;
+      fitnessDataBuff[buffCount++] = saveSecond & 0xff;
+      fitnessDataBuff[buffCount++] = (uint8_t)((meanSpeed >> 8) & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)(meanSpeed & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)((uintDistanceKm >> 8) & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)(uintDistanceKm & 0xff);
+      fitnessDataBuff[buffCount++] = meanHeartRate & 0xff;
+      fitnessDataBuff[buffCount++] = (uint8_t)((meanKcal >> 8) & 0xff);
+      fitnessDataBuff[buffCount++] = (uint8_t)(meanKcal & 0xff);
+
+      writeEnable();
+      writeFitnessData(fitnessDataBuff, saveAddress, SAVE_UNIT_STEP);
 #ifdef DEBUG
       Serial.print("저장 주소 --> ");  Serial.print("0x"); Serial.println(saveAddress, HEX);
-      Serial.print("인덱스 --> "); Serial.print((uint8_t)((register_index >> 8) & 0xff), HEX); Serial.println((uint8_t)(register_index & 0xff), HEX);
-      Serial.print("저장 시간 --> "); Serial.print((uint8_t)((saveYear >> 8) & 0xff), HEX); Serial.print((uint8_t)(saveYear & 0xff), HEX);
-      Serial.print(saveMonth, HEX);
-      Serial.print(saveDay, HEX);
-      Serial.print(saveHour, HEX);
-      Serial.print(saveMin, HEX);
-      Serial.println(saveSecond, HEX);
-
-      Serial.print("평균 속도 --> "); Serial.println(meanSpeed);
-      Serial.print("총 운동 거리 --> "); Serial.println(uintDistanceKm);
-      Serial.print("평균 심박수 --> "); Serial.println(meanHeartRate);
-      Serial.print("소모 열량 --> "); Serial.println(0);
+      Serial.print("인덱스 --> "); Serial.print((uint8_t)((register_index >> 8) & 0xff), HEX); Serial.println((uint8_t)(register_index & 0xff), HEX); //2바이트
+      Serial.print("저장 시간 --> "); Serial.print((uint8_t)((saveYear >> 8) & 0xff), HEX); Serial.print((uint8_t)(saveYear & 0xff), HEX); //2바이트
+      Serial.print(saveMonth, HEX); //1바이트
+      Serial.print(saveDay, HEX);   //1바이트
+      Serial.print(saveHour, HEX);  //1바이트
+      Serial.print(saveMin, HEX);   //1바이트
+      Serial.println(saveSecond, HEX); //1바이트
+      Serial.print("평균 속도 --> "); Serial.println(meanSpeed); // 2바이트
+      Serial.print("총 운동 거리 --> "); Serial.println(uintDistanceKm);  // 2바이트
+      Serial.print("평균 심박수 --> "); Serial.println(meanHeartRate);  //1바이트
+      Serial.print("소모 열량 --> "); Serial.println(0); //2바이트
 
 #endif
       register_index++;
@@ -523,6 +613,12 @@ void loop() {
       distanceUnitKm = 0;
       startFitnessTime = 0;
       endFitnessTime = 0;
+      sumSpeed = 0;
+      workoutTime = 0;
+      uintDistanceKm = 0;
+      sumDistanceKm = 0x0000;
+      sumSpeed = 0x0000;
+      sumHeartRate = 0;
 
 #ifdef DEBUG
       Serial.println("운동 종료처리");
@@ -534,20 +630,68 @@ void loop() {
   } else {
     // 블루투스 연결되어 있지 않은 상태이면서 운동 중이지 않을 때
 
+#ifdef DEBUG
+
     device_id = getDeviceID();
     Serial.print("id: "); Serial.println(device_id, HEX);
     getNowTime();
-    delay(1000);
-  }
 
+    unsigned char hr_test = readHeartRate(HR_ADDR);
+    //    uint16_t heartRateCount = 0;
+    //boolean heartRateMeasureFlag = false;
+    //boolean heartRateLocationFlag = false;
+    Serial.print("hr_first_check: "); Serial.println(hr_test, DEC);
+    if (hr_test == 0) {
+      heartRateMeasureFlag = false;
+      heartRateLocationFlag = false;
+      Serial.println("심박 센서 착용 안됨 : error code e400");
+    } else if (hr_test > 0 && hr_test < 60) {
+      heartRateMeasureFlag = true;
+      heartRateLocationFlag = false;
+      Serial.println("올바른 위치 확인 :  에러코드 e401");
+    } else {
+      heartRateMeasureFlag = true;
+      heartRateLocationFlag = true;
+      Serial.print("심박수 조건 완료 --> ");
+      Serial.print("hr: "); Serial.println(hr_test, DEC);
+      globalHeartRate = hr_test;
+      // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행
+    }
+    delay(1000);
+#endif
+  }
 }
 
+void checkHeartRateInWorkout() {
+  unsigned char hr_test = readHeartRate(HR_ADDR);
+  //    uint16_t heartRateCount = 0;
+  //boolean heartRateMeasureFlag = false;
+  //boolean heartRateLocationFlag = false;
+  if (hr_test == 0) {
+    heartRateMeasureFlag = false;
+    Serial.println("심박 센서 착용 안됨 : error code e400");
+  } else if (hr_test > 0 && hr_test < 60) {
+    heartRateMeasureFlag = true;
+    heartRateLocationFlag = false;
+    Serial.println("올바른 위치 확인 :  에러코드 e401");
+  } else {
+    heartRateMeasureFlag = true;
+    heartRateLocationFlag = true;
+    Serial.print("심박수 조건 완료 --> ");
+    Serial.print("hr: "); Serial.println(hr_test, DEC);
+    globalHeartRate = hr_test;
 
+    // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행 --> 운동 종료시 초기화 될 변수
+    heartRateCount++;
+    sumHeartRate += globalHeartRate;
+  }
+}
+
+//블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
 void updateBatteryLevel() {
   /* Read the current voltage level on the A0 analog input pin.
      This is used here to simulate the charge level of a battery.
   */
-
   unsigned char hr = readHeartRate(HR_ADDR);
   heartRateData[1] = hr;
   heartRateMeansurement.setValue(heartRateData, 2);
@@ -558,9 +702,12 @@ void updateBatteryLevel() {
   //indoorBikeData[2] = (uint8_t)((uint16_t)(speedNow * 100) >> 8 & 0xFF);
   //indoorBikeData[3] = (uint8_t)((uint16_t)(speedNow * 100) & 0xFF);
 #endif
-
 }
 
+/**
+   심박센서로 심박수를 읽어오는 함수
+   심박 센서와 i2c 통신이 필요하다.
+*/
 unsigned char readHeartRate(byte addr) {
   unsigned char c = 0;
   Wire.requestFrom(addr >> 1, 1);
@@ -570,16 +717,14 @@ unsigned char readHeartRate(byte addr) {
   return c;
 }
 
-
 void blePeripheralConnectHandler(BLEDevice central) {
-  digitalWrite(13, HIGH); // turn on the LED to indicate the connection:
+  //  digitalWrite(13, HIGH); // turn on the LED to indicate the connection:
+  digitalWrite(BLE_LED_INDICATOR_PIN, HIGH);
   deviceConnectedFlag = true;
-
 #ifdef DEBUG
   Serial.print("Connected to central: ");
   Serial.println(central.address()); // print the central's MAC address:
 #endif
-
 }
 
 /**
@@ -587,14 +732,14 @@ void blePeripheralConnectHandler(BLEDevice central) {
 */
 void blePeripheralDisconnectHandler(BLEDevice central) {
   // when the central disconnects, turn off the LED:
-  digitalWrite(13, LOW);
+  //  digitalWrite(13, LOW);
+  digitalWrite(BLE_LED_INDICATOR_PIN, LOW);
   deviceConnectedFlag = false;
 
 #ifdef DEBUG
   Serial.print("Disconnected event, central: ");
   Serial.println(central.address());
 #endif
-
 }
 
 int rxHead = 0;
@@ -629,12 +774,14 @@ void datatimeSyncCharacteristicWritten(BLEDevice central, BLECharacteristic char
     resultPacket[1] = 0x00;
     resultPacket[2] = 0x03;
     dateTimeSyncChar.setValue(resultPacket, 3);
+    bleDateTimeSycnFlag = true;
   } else {
     //날짜 정보가 올바르지 않은 경우
     resultPacket[0] = 0x02;
     resultPacket[1] = 0xff;
     resultPacket[2] = 0x03;
     dateTimeSyncChar.setValue(resultPacket, 3);
+    bleDateTimeSycnFlag = false;
   }
 }
 
@@ -672,6 +819,7 @@ void authCharCharacteristicWritten(BLEDevice central, BLECharacteristic characte
     if (!authCoreValue[i] == aes_result[i]) {
       //      Serial.println("Error");
       authFlag = false;
+
     } else {
       //      Serial.print("SUCESS");
       authFlag = true;
@@ -682,15 +830,70 @@ void authCharCharacteristicWritten(BLEDevice central, BLECharacteristic characte
     authData[1] = 0x00;
     authData[2] = 0x03;
     authChar.setValue(authData, 3);
+    bleAuthCheckFlag = true;
   } else {
     authData[0] = 0x02;
     authData[1] = 0xFF;
     authData[2] = 0x03;
     authChar.setValue(authData, 3);
+    bleAuthCheckFlag = false;
   }
 
   //  authCoreValue
 }
+
+
+/**
+    데이터 동기화를 위한 콜백함수 - 박제창
+    데이터 전송 요청
+    0x00 : 전부
+    0xyy : 아직 정해지지 않음 Reserved
+  boolean bleDateTimeSycnFlag = false // 블루투스를 통해 시간 동기화가 되었을시 처리하는 플래그
+  boolean bleAuthCheckFlag = false // 사용자 인증을 위한 플래그 실패시 false 성공시 true
+  boolean bleDataSyncFlag = false // 데이터 전송 요청 이 들어왔을겨우 올바른 데이터 형식이면 true 아니면 false
+
+*/
+void dataSyncCharCharacteristicWritten(BLEDevice central, BLECharacteristic characteristic) {
+  // central wrote new value to characteristic, update LED
+
+  size_t len = controlChar.valueLength();
+#ifdef DEBUG
+  Serial.println("Characteristic event, written: dataSyncCharCharacteristicWritten ");
+  Serial.print("len --> "); Serial.println(len);
+#endif
+  const unsigned char *data = controlChar.value();
+
+  // 동기화를 위해 시간 동기화, 인증 동기화가 모두 완벽하게 진행됬다면
+  if (bleDateTimeSycnFlag && bleAuthCheckFlag) {
+    // 사전 동기화 과정이 완료되고 길이가 3개인패킷이 들어왔다면
+    if (len == 3) {
+      // 시작 신호와 종료신호가 올바르다면
+      if (data[0] == 0x02 && data[2] == 0x03) {
+        // 중간의 명령어가 올바르다면 0x00 : 모두 전송
+        if (data[1] == 0x00) {
+          for (int i = 0 ; i < register_index; i++) {
+            uint8_t syncBuff[16]  = {0,};
+            int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+            writeEnable();
+            digitalWrite(chipSelectPin, LOW);
+
+            SPI.transfer(CMD_READ_DATA);
+            SPI.transfer(tmpAddress >> 16);
+            SPI.transfer((tmpAddress >> 8) & 0xff);
+            SPI.transfer(tmpAddress & 0xff);
+
+            for ( uint16_t i = 0; i < 16; i++ ) {
+              syncBuff[i] = SPI.transfer(0x00);
+            }
+            digitalWrite(chipSelectPin, HIGH);
+            syncChar.setValue(syncBuff, 16);
+          }
+        }
+      }
+    }
+  }
+}
+
 
 void addReceiveBytes(const uint8_t* bytes, size_t len) {
   // note increment rxHead befor writing
@@ -839,6 +1042,36 @@ void writeInfoIndex(uint8_t* writeData, int addr) {
   digitalWrite(chipSelectPin, HIGH);
 }
 
+/**
+   운동 종료후 운동 정보를 저장하는 부분
+*/
+void writeFitnessData(uint8_t* writeData, int addr, int writeSize) {
+
+  uint8_t sndBytes[4] = { 0 };
+  //  int saveIndex = writeSize - 1;
+
+  sndBytes[0] = COMMAND_PAGE_PROGRAM;
+  sndBytes[1] = (uint16_t)(addr >> 16);
+  sndBytes[2] = (uint16_t)(addr >> 8);
+  sndBytes[3] = (uint16_t)addr;
+
+  waitForWrite();
+  writeEnable();
+
+  digitalWrite(chipSelectPin, LOW);
+
+  SPI.transfer(sndBytes[0]);
+  SPI.transfer(sndBytes[1]);
+  SPI.transfer(sndBytes[2]);
+  SPI.transfer(sndBytes[3]);
+
+  for (int i = 0; i < writeSize; i++) {
+    SPI.transfer(writeData[i]);
+  }
+  digitalWrite(chipSelectPin, HIGH);
+}
+
+
 void subSectorErase(int addr) {
   uint8_t sndBytes[4] = { 0 };
 
@@ -896,6 +1129,24 @@ void writeSR(uint8_t setReg) {
 }
 
 uint16_t N25Q256_read(uint32_t addr, uint8_t *buf, uint16_t n)
+{
+  digitalWrite(chipSelectPin, LOW);
+
+  SPI.transfer(CMD_READ_DATA);
+  SPI.transfer(addr >> 16);
+  SPI.transfer((addr >> 8) & 0xff);
+  SPI.transfer(addr & 0xff);
+
+  uint16_t i;
+  for (i = 0; i < n; i++ ) {
+    buf[i] = SPI.transfer(0x00);
+  }
+
+  digitalWrite(chipSelectPin, HIGH);
+  return i;
+}
+
+uint16_t N25Q256_readFitness(uint32_t addr, uint8_t *buf, uint16_t n)
 {
   digitalWrite(chipSelectPin, LOW);
 
@@ -1054,4 +1305,45 @@ void dump(uint8_t *dt, uint32_t n)
   Serial.print("");
   Serial.print("");
   Serial.print("\n");
+}
+
+void serialEvent() {
+  while (Serial.available()) {
+    char inChar = (char)Serial.read();
+    Serial.println(inChar);
+    if (inChar == 'd') {
+      Serial.println(inChar);
+      memset(buf, 0, 256);
+      writeEnable();
+      n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
+      dump(buf, 256); // 읽어온 데이터를 확인하는 함수
+    }
+
+    if (inChar == 'e') {
+      Serial.println(inChar);
+      memset(buf, 0, 256);
+      writeEnable();
+      subSectorErase(INFO_ADDRESS);
+      writeEnable();
+      subSectorErase(BASE_ADDRESS);
+      writeEnable();
+      n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
+      dump(buf, 256); // 읽어온 데이터를 확인하는 함수
+    }
+    if (inChar == 's') {
+
+      //       memset(buf, 0, 256);
+      for (int i = 0 ; i < register_index; i++) {
+        uint8_t syncBuff[16]  = {0,};
+        int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+        n = N25Q256_read(tmpAddress, syncBuff, 16); // buf 메모리에 읽어온 16개 데이터를 저장한다.
+        for (int k = 0 ; k < 16; k ++) {
+          Serial.print(syncBuff[k]);
+        }
+        Serial.println("");
+      }
+
+
+    }
+  }
 }
