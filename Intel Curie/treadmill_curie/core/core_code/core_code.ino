@@ -1,71 +1,152 @@
+/*
+      made by : JAICHANGPARK aka DREAMWALKER
+      인텔 큐리 보드 사용
+      32비트 쿼크 코어
+      트레드밀 (KNU TM0)
+
+*/
+
 #include <CurieTime.h>
 #include <CurieBLE.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <Wire.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include "Crypto.h"
 
-
+#define DEBUG
 #define TREADMILL
 #define INDOOR_BIKE
-#define DEBUG
 
+#define HR_ADDR                       0xA0    //심박 센서 주소 
+#define MAX_AES_PROCESS               32
 
+#define INFO_ADDRESS                  0x000000
+#define BASE_ADDRESS                  0x004000
+#define SAVE_UNIT_STEP                18      // 메모리 저장 스탭 크기
+#define SAVE_FITNESS_BUFFER_SIZE      18      // 1단위 데이터 저장 버퍼 크기
+
+#define COMMAND_WRITE_ENABLE          (byte)0x06
+#define COMMAND_RANDOM_READ           (byte)0x03
+#define COMMAND_FAST_READ             (byte)0x0B
+#define COMMAND_PAGE_PROGRAM          (byte)0x02
+#define COMMAND_SECTOR_ERASE          (byte)0xD8
+#define COMMAND_BULK_ERASE            (byte)0xC7
+#define COMMAND_READ_STATUSREG        (uint8_t)0x05
+#define COMMAND_READ_ID               (byte)0x9E
+#define COMMAND_WRITE_STATUSREG       (uint8_t)0x01
+#define COMMAND_READ_FLAG_STATUS      0x70
+#define COMMAND_SUB_SECTOR_ERASE      0x20
+#define CMD_READ_DATA                 0x03
+#define CMD_RDSR1                     0x05
+#define SR1_BUSY_MASK                 0x01
+#define SR1_WEN_MASK                  0x02
+#define CMD_PAGEPROG                  0x02
 
 #define MAGNET_INTERRUPT_PIN          2
 #define BLE_LED_INDICATOR_PIN         3
+#define RFID_RST_PIN                  5
+#define RFID_SS_PIN                   6
+#define TFT_DC                        7
+#define TFT_RST                       8
+#define TFT_CS                        9
+#define FLASH_CHIP_SELECT_PIN         10
 
-#define RFID_RST_PIN   5
-#define RFID_SS_PIN    6
+#define TREADMILL_DISTANCE            0.13F         //단위 m 
+#define WORKOUT_DONE_TIME_MILLIS      500           // 운동 자동 종료 시간 500ms후 모든 정보 초기화 및 변수 저장.
+#define REAL_TIME_SEND_INTERVAL       1000          // 실시간 운동 시 1초 간격으로 데이터를 보내도록 .
+#define ONE_SECOND                    1000
+#define ONE_MINUTE                    (60 *1000)
+#define CAL_MINUTE(X)                 (X * ONE_MINUTE)
 
-
-#define TREADMILL_DISTANCE            0.13F //단위 m 
-
-volatile uint32_t count = 0;      // 인터럽트 클럭 카운트 수
-volatile float distance = 0.0f;   // 거리 변수 [ m]
+volatile uint32_t count = 0;          // 인터럽트 클럭 카운트 수
+volatile float distance = 0.0f;       // 거리 변수 [ m]
 volatile float distanceUnitKm = 0.0f; // 거리 변수 [km]
-volatile float speedNow = 0.0f; // 순간 속도 변수 [km/h]
+volatile float speedNow = 0.0f;       // 순간 속도 변수 [km/h]
 volatile uint16_t uintSpeedNow = 0;
 volatile uint32_t uintTotalDistance = 0;
 
-volatile long t = 0;  // 센서 입력 외부 인터럽트 시간 변수 .
-volatile float InstantTime = 0.0f;
-volatile int diffTime = 0.0f;
+/*************** 평균 운동량 정보 처리 변수    ****************************/
+volatile uint16_t uintDistanceKm = 0;
+volatile uint32_t sumDistanceKm = 0x0000;  // 평균을 구하기 위한 이동거리 변수 ( 더 해짐)
+volatile uint32_t sumSpeed = 0x0000;  // 평균 속도를 구하기 위한 속도 합 변수 (더 해짐)
+volatile uint32_t sumHeartRate = 0;   // 평균 심박수를 구하기 위한 변수
 
-long saveMinTime = 0;
+/*************** 심박수 처리 변수   ****************************/
+uint8_t globalHeartRate = 0; // 심박수 전역 변수
+uint16_t heartRateCount = 0; // 심박수 평균을 구하기위한 계수 카운터 변수
+
+/*************** 프로그램 시간 관리 변수   ****************************/
+volatile long t = 0;                  // 센서 입력 외부 인터럽트 시간 변수 : 운동 종료시 초기화 필요
+volatile float InstantTime = 0.0f;    // 운동 종료시 초기화 필요
+volatile int diffTime = 0.0f;         // 인터럽트 발생 시간 차를 구하기 위한 변수 :millisecond의 시간차를 확인한다.
+volatile long startFitnessTime = 0;   // 운동 시작 시간 저장 변수 ( 1회 저장된다) 운동종료시 초기화 필요
+volatile long endFitnessTime = 0;     // 운동 종료 시간 변수  : 운동 종료시 초기화 필요
+volatile long workoutTime = 0;        // 운동 시간 계산 변수  : 운동 종료시 초기화 필요
+
+long tftTimeIndex = 0;                // 디스플레이 변경을 위한 시간 변수
+long saveMinTime = 0;                 // 임의 시간 인터럽트 해제를 위한 시간 변수 (카운트 계수에 사용된다)
+long realTimePreviousMillis = 0;  // 실시간운동 정보 초기화를 위한 한계 시간 약 3초 이상 인터럽트가 없으면 초기화한다.
+
+
+/*************** 프로그램 스위치 플래그  ****************************/
+// 1byte를 가지고 마스크 처리해도 되긴한데 그냥 이렇게 하도록 한다.
+// 시간이 읍다 흑
+
+boolean deviceConnectedFlag = false;      //장비가 블루투스 연결이 되었는지 확인하는 플래그
+boolean fitnessStartOrEndFlag = false;    // 운동의 시작과 종료를 판단하는 플레그
+boolean heartRateMeasureFlag = false;     // 심박 센서 착용여부 플레그
+boolean heartRateLocationFlag = false;    // 심박 센서 위치 확인플레그
+boolean userRFIDCheckFlag = false;        // RFID 접촉 여부 확인 플레그
+
+boolean bleDateTimeSycnFlag = false;      // 블루투스를 통해 시간 동기화가 되었을시 처리하는 플래그
+boolean bleAuthCheckFlag = false;         // 사용자 인증을 위한 플래그 실패시 false 성공시 true
+boolean bleDataSyncFlag = false;          // 데이터 전송 요청 이 들어왔을겨우 올바른 데이터 형식이면 true 아니면 false
+
+/*****암호화 패킷 버퍼 ****************************/
+static byte aes_key[16] = {2, 2, 2, 2, 0, 0, 0, 0, 1, 1, 1, 1, 8, 8, 8, 8};
+static byte aes_iv[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+static byte aes_result[MAX_AES_PROCESS];
+byte authCoreValue[] = "9876543210100001"; //16 chars == 16 bytes
+byte encrypted[16]; // AHA! needs to be large, 2x is not enough
+
+/*****블루투스 패킷 버퍼 ****************************/
+uint8_t heartRateData[] = {0b00000010, 0x00};
+uint8_t treadmillData[] = {0x05, 0x00, 0x00, 0x00, 0x00};
+uint8_t indoorBikeData[] = {0x00, 0x00, 0x00, 0x00};
+uint8_t authData[] = {0x00, 0x00, 0x00};     // 결과 값 반환 패킷 데이터 버퍼
+uint8_t resultPacket[] = {0x00, 0x00, 0x00}; // 결과 값 반환 패킷 데이터 버퍼
+
+/*****시리얼 플레시 메모리 ****************************/
+int device_id, addr, data, i = 0;
+uint8_t page[256] = {0,};
+uint8_t buf[256]  = {0,};
+uint8_t init_buff[16] = {0,};
+uint8_t w_data[16] = {0,};
+uint16_t n = 0;
+uint16_t register_index = 0;  // 저장 인덱스 총괄
+uint32_t base_address = 0;
+uint32_t now_address = 0;
 
 /*****RFID 객체 변수 ****************************/
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN); // Instance of the class
 MFRC522::MIFARE_Key key;
 byte nuidPICC[4] = {0xff, 0xff, 0xff, 0xff};
 
+/****TFT 디스플레이 객체 **/
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS,  TFT_DC, TFT_RST);
+int lcdCnt = 0;
 
-/*************************************************************
-   인터럽트 서비스 루틴 (ISR) 함수
-   카운트 처리
-   속도 연산
-   거리 연산
-   제작 : 박제창
- ***********************************************************/
-void interrupt_func() {
+/******전역 함수 정의 *******************************/
+void printHex(byte *buffer, byte bufferSize);
+void printDec(byte *buffer, byte bufferSize);
+void interrupt_func();
 
-#ifdef TREADMILL
-  long interrupt_time = millis(); // 인터럽트가 발생한 시간을 저장
-  count++; //자계 센서로 부터 외부인터럽트가 발생하면 1씩 증가시키도록
-  distance = (TREADMILL_DISTANCE * count); // 총 이동 거리 --> 단위 넣을것
-  distanceUnitKm = distance / 1000.0f; // 단위 km
+extern BLECharacteristic indorBikeChar;
+extern BLECharacteristic treadmillChar;
+extern BLECharacteristic heartRateMeansurement;
 
-  diffTime = interrupt_time - t; // millisecond의 시간차를 확인한다.
-
-  InstantTime = (float)(interrupt_time - t) / 1000.0f;  // 과거의 시간과 현재의 시간을 뺀다.
-  speedNow = 3.6f * (TREADMILL_DISTANCE / InstantTime);  // 현재 속도는 =  1회전 거리 / 1회전 발생 시간
-  t = millis(); //시간 저장
-#elif INDOORBIKE
-#else
-#endif
-}
 
 void setup() {
 
@@ -81,46 +162,116 @@ void setup() {
   digitalWrite(BLE_LED_INDICATOR_PIN, HIGH);
   delay(1000);
   digitalWrite(BLE_LED_INDICATOR_PIN, LOW);
+  initTFTDisplay();
+  setupBluetoothLowEnergy();
 
 }
 
 void loop() {
+  BLE.poll();
+  long currentTimeIndicatorMillis = millis();
 
+  if (deviceConnectedFlag) {      // 블루투스 연결은 되어 있는 상태
+    if (fitnessStartOrEndFlag) { // 블루투스 연결은 되어 있는 상태에서 운동 중일 때만 실시간 전송이 되도록
+      long currentMillis = millis();
+      // if 200ms have passed, check the battery level:
+      if (currentMillis - realTimePreviousMillis >= REAL_TIME_SEND_INTERVAL) {
+        realTimePreviousMillis = currentMillis;
+        indoorBikeData[2] = (uint8_t)(uintSpeedNow & 0xFF);
+        indoorBikeData[3] = (uint8_t)(uintSpeedNow >> 8) & 0xFF;
+        indorBikeChar.setValue(indoorBikeData, 4);
 
+        treadmillData[2] = (uint8_t)(uintTotalDistance & 0xFF);
+        treadmillData[3] = (uint8_t)(uintTotalDistance >> 8) & 0xFF;
+        treadmillData[4] = (uint8_t)(uintTotalDistance >> 16) & 0xFF;
+        treadmillChar.setValue(treadmillData, 5);
+        updateHeartRateLevel();
 
-  long currentTime = millis();
-
-
-
-
-  if (currentTime - t >= 500) {
 #ifdef DEBUG
-    Serial.println("운동종료");
-    count = 0;
-    for (int i = 0; i < 4 ; i ++) {
-      nuidPICC[i] = 0xff;
+        Serial.println("블루투스 연결은 되어 있으면서 운동중입니다.");
+        Serial.print("count -> "); Serial.print(count);
+        Serial.print("| distance -> "); Serial.print(distance);
+        Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
+        Serial.print("| diffTime -> "); Serial.print(diffTime);
+        Serial.print("| InstantTime -> "); Serial.print(InstantTime);
+        Serial.print("| speedNow -> "); Serial.println(speedNow);
+#endif
+
+      }
+
+    } else {
+      //블루투스 연결은 되어 있지만 운동중이지 않을때 { == 운동 종료 상태일때)
+#ifdef DEBUG
+      Serial.println("블루투스 연결은 되어 있지만 운동 중이지 않습니다.");
+#endif
     }
-#endif
-  } else {
+  }
+  else {  //블루투스 연결되어 있지 않은 상태이면
+    if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
+
 #ifdef DEBUG
-    Serial.print("count -> "); Serial.print(count);
-    Serial.print("| distance -> "); Serial.print(distance);
-    Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
-    Serial.print("| diffTime -> "); Serial.print(diffTime);
-    Serial.print("| InstantTime -> "); Serial.print(InstantTime);
-    Serial.print("| speedNow -> "); Serial.println(speedNow);
+      Serial.println("블루투스 연결되어 있지 않지만 운동중입니다.");
+      Serial.print("count -> "); Serial.print(count);
+      Serial.print("| distance -> "); Serial.print(distance);
+      Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
+      Serial.print("| diffTime -> "); Serial.print(diffTime);
+      Serial.print("| InstantTime -> "); Serial.print(InstantTime);
+      Serial.print("| speedNow -> "); Serial.println(speedNow);
 #endif
+      //운동  종료 처리 !
+      if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {
+#ifdef DEBUG
+        Serial.println("운동종료");
+        count = 0;
+        for (int i = 0; i < 4 ; i ++) {
+          nuidPICC[i] = 0xff;
+        }
+#endif
+      }
+
+    } else { //블루투스 연결되어 있지 않은 상태에서 운동 중이지 않다면, (== 운동중이지 않을때)
+#ifdef DEBUG
+      Serial.println("블루투스 연결되어 있지 않은 상태이고 운동 중이지 않습니다.");
+
+      device_id = getDeviceID();
+      Serial.print("id: "); Serial.println(device_id, HEX);
+      getNowTime();
+
+      unsigned char hr_test = readHeartRate(HR_ADDR);
+      //    uint16_t heartRateCount = 0;
+      //boolean heartRateMeasureFlag = false;
+      //boolean heartRateLocationFlag = false;
+      Serial.print("hr_first_check: "); Serial.println(hr_test, DEC);
+      if (hr_test == 0) {
+        heartRateMeasureFlag = false;
+        heartRateLocationFlag = false;
+        Serial.println("심박 센서 착용 안됨 : error code e400");
+      } else if (hr_test > 0 && hr_test < 60) {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = false;
+        Serial.println("올바른 위치 확인 :  에러코드 e401");
+      } else {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = true;
+        Serial.print("심박수 조건 완료 --> ");
+        Serial.print("hr: "); Serial.println(hr_test, DEC);
+        globalHeartRate = hr_test;
+        // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행
+      }
+#endif
+    }
   }
 
-  if (currentTime - saveMinTime >= 60000) {
-    //    detachInterrupt(MAGNET_INTERRUPT_PIN);
-    //    saveMinTime = 0;
-  } else {
-
-  }
-
+  //  if (currentTimeIndicatorMillis - saveMinTime >= CAL_MINUTE(10) ) {
+  //    detachInterrupt(MAGNET_INTERRUPT_PIN);
+  //    saveMinTime = 0;
+  //  } else {
+  //
+  //  }
+  
   rfid_address_read(); // RFID 아이디를 읽는다.
-
+  displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
+  
 }
 
 void rfid_address_read() {
@@ -148,14 +299,18 @@ void rfid_address_read() {
   if (rfid.uid.uidByte[0] != nuidPICC[0] ||
       rfid.uid.uidByte[1] != nuidPICC[1] ||
       rfid.uid.uidByte[2] != nuidPICC[2] ||
-      rfid.uid.uidByte[3] != nuidPICC[3] ) {
-    Serial.println(F("A new card has been detected."));
+      rfid.uid.uidByte[3] != nuidPICC[3] ) { // 읽어온 데이터와 기본 저장된 배열 매칭 작업
 
     // Store NUID into nuidPICC array
     for (byte i = 0; i < 4; i++) {
       nuidPICC[i] = rfid.uid.uidByte[i];
     }
 
+    userRFIDCheckFlag = true;
+
+
+#ifdef DEBUG
+    Serial.println(F("A new card has been detected."));
     Serial.println(F("The NUID tag is:"));
     Serial.print(F("In hex: "));
     printHex(rfid.uid.uidByte, rfid.uid.size);
@@ -163,13 +318,119 @@ void rfid_address_read() {
     Serial.print(F("In dec: "));
     printDec(rfid.uid.uidByte, rfid.uid.size);
     Serial.println();
+#endif
   }
-  else Serial.println(F("Card read previously."));
+  else {
+    userRFIDCheckFlag = true;
+    Serial.println(F("Card read previously."));
+  }
 
-  // Halt PICC
-  rfid.PICC_HaltA();
+  rfid.PICC_HaltA();   // Halt PICC
+  rfid.PCD_StopCrypto1();   // Stop encryption on PCD
 
-  // Stop encryption on PCD
-  rfid.PCD_StopCrypto1();
+}
+
+
+void initTFTDisplay() {
+  // Use this initializer if you're using a 1.8" TFT
+  tft.initR(INITR_BLACKTAB);   // initialize a ST7735S chip, black tab
+  //  Serial.println("Initialized");
+  tft.fillScreen(ST77XX_BLACK);
+  tft.invertDisplay(true);
+}
+
+void displaySet(long * currerntMillis) {
+  if (*currerntMillis - tftTimeIndex >= 3000) {
+    int lcdModulo = lcdCnt % 4 ;
+    switch (lcdModulo) {
+      case 0:
+        tftPrintTest3();
+        break;
+      case 1:
+        tftPrintTest4();
+        break;
+      case 2:
+        tftPrintTest2();
+        break;
+      case 3:
+        tftPrintTest3();
+        break;
+    }
+    lcdCnt++;
+    tftTimeIndex = millis();
+  }
+}
+
+void testdrawtext(char *text, uint16_t color) {
+  tft.setCursor(0, 0);
+  tft.setTextColor(color);
+  tft.setTextWrap(true);
+  tft.print(text);
+}
+
+void tftPrintTest2() {
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(10, 10);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Distance");
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("1.6 km");
+}
+
+void tftPrintTest3() {
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(10, 10);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("HR");
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("89 bpm");
+}
+
+void tftPrintTest4() {
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(10, 10);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Speed");
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("5.0 km/h");
+}
+
+//블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
+void updateHeartRateLevel() {
+  /* Read the current voltage level on the A0 analog input pin.
+     This is used here to simulate the charge level of a battery.
+  */
+  unsigned char hr = readHeartRate(HR_ADDR);
+  heartRateData[1] = hr;
+  heartRateMeansurement.setValue(heartRateData, 2);
+
+#ifdef DEBUG
+  Serial.print("HR -> "); Serial.println(hr, DEC);
+  //delay(1000);
+  //indoorBikeData[2] = (uint8_t)((uint16_t)(speedNow * 100) >> 8 & 0xFF);
+  //indoorBikeData[3] = (uint8_t)((uint16_t)(speedNow * 100) & 0xFF);
+#endif
+}
+
+/**
+   심박센서로 심박수를 읽어오는 함수
+   심박 센서와 i2c 통신이 필요하다.
+*/
+unsigned char readHeartRate(byte addr) {
+  unsigned char c = 0;
+  Wire.requestFrom(addr >> 1, 1);
+  while (Wire.available()) {
+    c = Wire.read();
+  }
+  return c;
 }
 
