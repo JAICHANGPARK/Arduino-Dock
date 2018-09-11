@@ -10,12 +10,9 @@
 #include <CurieTime.h>
 #include <Wire.h>
 #include <CurieBLE.h>
-
 #include <SPI.h>
-#include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
 #include "Crypto.h"
 
 #define MAX_AES_PROCESS 32
@@ -24,9 +21,8 @@
 #define ONE_ROUND_DISTANCE 2.198F
 #define LEXPA_DISTANCE 5.0F
 
-#define REAL_TIME_STOP_MILLIS 3000
-#define WORKOUT_DONE_TIME_MILLIS 30000
-
+#define REAL_TIME_STOP_MILLIS 3000      // 실시간 3초 반응 없을 시 값 초기화
+#define WORKOUT_DONE_TIME_MILLIS 30000   // 운동 자동 종료 시간 30초후 모든 정보 초기화 및 변수 저장.
 
 #define DEBUG
 #define ERGOMETER_LEXPA
@@ -38,9 +34,10 @@ Adafruit_SSD1306 display(OLED_RESET);
 #endif
 
 #define INFO_ADDRESS              0x000000
-#define BASE_ADDRESS              0x001000
+#define BASE_ADDRESS              0x004000
 #define SAVE_UNIT_STEP            18      // 메모리 저장 스탭 크기
-#define SAVE_FITNESS_BUFFER_SIZE  18      // 1단위 데이터 저장 버퍼 크기
+#define SAVE_FITNESS_BUFFER_SIZE  18
+// 1단위 데이터 저장 버퍼 크기
 
 #define COMMAND_WRITE_ENABLE      (byte) 0x06
 #define COMMAND_RANDOM_READ       (byte)0x03
@@ -60,7 +57,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define SR1_WEN_MASK              0x02
 #define CMD_PAGEPROG              0x02
 
-#define BLE_LED_INDICATOR_PIN         4
+#define BLE_LED_INDICATOR_PIN        5
 
 
 BLEService heartRateService("180D"); // BLE Battery Service
@@ -321,6 +318,10 @@ void displayPhaseFour() {
 
 */
 void setup() {
+  pinMode(BLE_LED_INDICATOR_PIN, OUTPUT);
+  digitalWrite(BLE_LED_INDICATOR_PIN, HIGH);
+  delay(1000);
+  digitalWrite(BLE_LED_INDICATOR_PIN, LOW);
 
   // put your setup code here, to run once:
 #ifdef DEBUG
@@ -329,11 +330,7 @@ void setup() {
   Wire.begin();
   //  pinMode(LED_BUILTIN, OUTPUT);  -- 13번 핀 사용중이기 때문에 수정
   attachInterrupt(2, interrupt_func, FALLING);
-  pinMode(BLE_LED_INDICATOR_PIN, OUTPUT);
 
-  digitalWrite(BLE_LED_INDICATOR_PIN, HIGH);
-  delay(1000);
-  digitalWrite(BLE_LED_INDICATOR_PIN, LOW);
 
   AES.Initialize(aes_iv, aes_key);  // aes 암호화 초기화
 
@@ -911,11 +908,23 @@ void dataSyncCharCharacteristicWritten(BLEDevice central, BLECharacteristic char
     if (len >= 3) {
       // 시작 신호와 종료신호가 올바르다면
       if (data[0] == 0x02 && data[2] == 0x03) {
+#ifdef DEBUG
+        Serial.println("시작신호 종료신호 잘 들어옴 ");
+#endif
         // 중간의 명령어가 올바르다면 0x00 : 모두 전송
         if (data[1] == 0x00) {
-          for (int i = 0 ; i < register_index; i++) {
-            uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE]  = {0,};
-            int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+          //          delay(2000);
+#ifdef DEBUG
+          Serial.println("모든 레지스터 데이터 전송");
+          Serial.print("register_index --> "); Serial.println(register_index);
+#endif
+          uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE]  = {0, 0,};
+          for (int i = 0; i < register_index; i++) {
+            uint32_t tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+#ifdef DEBUG
+            Serial.print("tmpAddress --> "); Serial.println(tmpAddress, HEX);
+#endif
+            //            n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 18개 데이터를 저장한다.
             writeEnable();
             digitalWrite(chipSelectPin, LOW);
 
@@ -924,21 +933,44 @@ void dataSyncCharCharacteristicWritten(BLEDevice central, BLECharacteristic char
             SPI.transfer((tmpAddress >> 8) & 0xff);
             SPI.transfer(tmpAddress & 0xff);
 
-            for ( uint16_t i = 0; i < SAVE_UNIT_STEP; i++ ) {
-              syncBuff[i] = SPI.transfer(0x00);
+            for ( uint16_t k = 0; k < SAVE_UNIT_STEP; k++ ) {
+              syncBuff[k] = SPI.transfer(0x00);
             }
+
             digitalWrite(chipSelectPin, HIGH);
-            syncChar.setValue(syncBuff, SAVE_UNIT_STEP);
+#ifdef DEBUG
+            //            for (int k = 0 ; k < SAVE_UNIT_STEP; k++) {
+            //              Serial.print(syncBuff[k], HEX);
+            //              Serial.print("|");
+            //            }
+            //            Serial.println("");
+#endif
+//            syncChar.setValue(syncBuff, SAVE_UNIT_STEP);
             delay(100);
           }
+#ifdef DEBUG
+          Serial.print("전송 선공");
+#endif
 
-          // 전송 성공 시
-          resultPacket[0] = 0x02;
-          resultPacket[1] = 0x03;
-          resultPacket[2] = 0x03;
-          resultChar.setValue(resultPacket, 3);
         }
+        // 전송 성공 시
+        resultPacket[0] = 0x02;
+        resultPacket[1] = 0x03;
+        resultPacket[2] = 0x03;
+        resultChar.setValue(resultPacket, 3);
+      } else {
+        // 시작 신호와 종료신호가 일치 하지 않다면
+        resultPacket[0] = 0x02;
+        resultPacket[1] = 0xff;
+        resultPacket[2] = 0x03;
+        resultChar.setValue(resultPacket, 3);
       }
+    } else {
+      // 길이가 3패킷보다 작다면ㄴ
+      resultPacket[0] = 0x02;
+      resultPacket[1] = 0xff;
+      resultPacket[2] = 0x03;
+      resultChar.setValue(resultPacket, 3);
     }
   } else {
     // 이전 단계의 모든 인증 실패 시
@@ -963,7 +995,7 @@ void addReceiveBytes(const uint8_t* bytes, size_t len) {
 /******************************************************************************
                                   플레시 메모리 함수
                       제작 : 박제창
- ***************************/
+ *********************************************************************************/
 int getDeviceID() {
   uint8_t rcvByte[3];
 
@@ -1398,7 +1430,8 @@ void serialEvent() {
         int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
         n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 16개 데이터를 저장한다.
         for (int k = 0 ; k < SAVE_UNIT_STEP; k ++) {
-          Serial.print(syncBuff[k]);
+          Serial.print(syncBuff[k], HEX);
+          Serial.print("|");
         }
         Serial.println("");
       }

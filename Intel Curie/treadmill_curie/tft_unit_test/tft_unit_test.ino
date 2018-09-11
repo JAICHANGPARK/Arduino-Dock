@@ -29,10 +29,10 @@
 
 // For the breakout, you can use any 2 or 3 pins
 // These pins will also work for the 1.8" TFT shield
-#define TFT_CS     9
-#define TFT_RST    8  // you can also connect this to the Arduino reset
+#define TFT_CS     10
+#define TFT_RST    9  // you can also connect this to the Arduino reset
 // in which case, set this #define pin to -1!
-#define TFT_DC     7
+#define TFT_DC     8
 
 // Option 1 (recommended): must use the hardware SPI pins
 // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
@@ -139,11 +139,11 @@ void loop() {
         break;
     }
     lcdCnt++;
-//
-//    tft.invertDisplay(true);
-//    delay(500);
-//    tft.invertDisplay(false);
-//    delay(500);
+
+    tft.invertDisplay(true);
+    delay(500);
+    tft.invertDisplay(false);
+    delay(500);
     tftTimeIndex = millis();
   }
 
