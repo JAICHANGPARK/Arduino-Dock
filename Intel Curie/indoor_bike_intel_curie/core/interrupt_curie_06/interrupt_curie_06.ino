@@ -29,7 +29,7 @@
 #define USE_OLED
 
 #ifdef USE_OLED
-#define OLED_RESET 4
+#define OLED_RESET 5
 Adafruit_SSD1306 display(OLED_RESET);
 #endif
 
@@ -57,7 +57,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define SR1_WEN_MASK              0x02
 #define CMD_PAGEPROG              0x02
 
-#define BLE_LED_INDICATOR_PIN        5
+#define BLE_LED_INDICATOR_PIN        4
 
 
 BLEService heartRateService("180D"); // BLE Battery Service
@@ -782,6 +782,7 @@ unsigned char readHeartRate(byte addr) {
                                  Bluetooth Callback Function
                                 제작 : 박제창
  ***************************/
+
 
 
 void blePeripheralConnectHandler(BLEDevice central) {

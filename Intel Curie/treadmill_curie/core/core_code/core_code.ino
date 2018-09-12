@@ -3,7 +3,6 @@
       인텔 큐리 보드 사용
       32비트 쿼크 코어
       트레드밀 (KNU TM0)
-
 */
 
 #include <CurieTime.h>
