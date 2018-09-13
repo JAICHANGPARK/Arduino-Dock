@@ -1,3 +1,10 @@
+/**
+ * 
+ * Bluetooth Low Energy Profile 
+ * Made by Dreamwalker 
+ * for Treadmill
+ */
+
 BLEService heartRateService("180D"); // BLE Heart rates Service
 BLECharacteristic heartRateMeansurement("2A37", BLERead | BLENotify , 2);
 BLEService fitnessMachineService("1826"); // BLE FitnessMachine Service

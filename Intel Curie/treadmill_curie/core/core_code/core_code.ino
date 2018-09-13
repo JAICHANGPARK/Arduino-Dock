@@ -19,6 +19,7 @@
 #define INDOOR_BIKE
 
 #define HR_ADDR                       0xA0    //심박 센서 주소 
+
 #define MAX_AES_PROCESS               32
 
 #define INFO_ADDRESS                  0x000000
@@ -90,7 +91,7 @@ volatile long workoutTime = 0;        // 운동 시간 계산 변수  : 운동 �
 long tftTimeIndex = 0;                // 디스플레이 변경을 위한 시간 변수
 long saveMinTime = 0;                 // 임의 시간 인터럽트 해제를 위한 시간 변수 (카운트 계수에 사용된다)
 long realTimePreviousMillis = 0;  // 실시간운동 정보 초기화를 위한 한계 시간 약 3초 이상 인터럽트가 없으면 초기화한다.
-
+long rfidContactedTime = 0;
 
 /*************** 프로그램 스위치 플래그  ****************************/
 // 1byte를 가지고 마스크 처리해도 되긴한데 그냥 이렇게 하도록 한다.
@@ -201,25 +202,37 @@ void loop() {
 
       }
 
+      displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
+
     } else {
       //블루투스 연결은 되어 있지만 운동중이지 않을때 { == 운동 종료 상태일때)
 #ifdef DEBUG
       Serial.println("블루투스 연결은 되어 있지만 운동 중이지 않습니다.");
 #endif
+
     }
   }
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
-
-
       if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {//500 ms 이상 인터럽트 발생 없다면 운동  종료 처리 !
-#ifdef DEBUG
-        Serial.println("운동종료");
-        fitnessStartOrEndFlag = false;
+        //시스템변수 초기화
         count = 0;
         for (int i = 0; i < 4 ; i ++) {
           nuidPICC[i] = 0xff;
         }
+
+        // 시스템 플레그 초기화
+        fitnessStartOrEndFlag = false;
+        userRFIDCheckFlag = false;
+
+        
+
+        // 시스템 디스플레이 종료 안내 
+        workoutDoneDisplay();// 운동 종료 표시해주기
+        delay(3000);
+        initTFTDisplay(); // 디스플레이 초기화
+#ifdef DEBUG
+        Serial.println("운동종료");
 #endif
       } else { //블루투스 연결되어 있지 않지만 운동중입니다.
 #ifdef DEBUG
@@ -231,11 +244,26 @@ void loop() {
         Serial.print("| InstantTime -> "); Serial.print(InstantTime);
         Serial.print("| speedNow -> "); Serial.print(speedNow);
         Serial.print("| roundSpeed -> "); Serial.println(roundSpeed);
-
 #endif
-
       }
 
+      unsigned char hr_realtime = readHeartRate(HR_ADDR);
+      if (hr_realtime == 0) {
+        heartRateMeasureFlag = false;
+        heartRateLocationFlag = false;
+      } else if (hr_realtime > 0 && hr_realtime < 60) {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = false;
+      } else {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = true;
+        globalHeartRate = hr_realtime;
+        // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행 --> 운동 종료시 초기화 될 변수
+        heartRateCount++;
+        sumHeartRate += globalHeartRate;
+      }
+      delay(500);
+      displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
     } else { //블루투스 연결되어 있지 않은 상태에서 운동 중이지 않다면, (== 운동중이지 않을때)
 #ifdef DEBUG
       Serial.println("블루투스 연결되어 있지 않은 상태이고 운동 중이지 않습니다.");
@@ -278,7 +306,9 @@ void loop() {
   //  }
 
   rfid_address_read(); // RFID 아이디를 읽는다.
-  displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
+  //  initTFTDisplay(); // 비용이 많이 든다면 삭제하자.
+
+  checkTFTDisplay(&currentTimeIndicatorMillis);
 
 }
 
@@ -315,6 +345,7 @@ void rfid_address_read() {
     }
 
     userRFIDCheckFlag = true;
+    rfidContactedTime = millis(); // 테그 접촉 시간 저장
 
 
 #ifdef DEBUG
@@ -330,21 +361,67 @@ void rfid_address_read() {
   }
   else {
     userRFIDCheckFlag = true;
+    rfidContactedTime = millis(); // 이미 접촉된 태그여도 접촉된 시간은 저장되야함. 이 변수의 역할이 그럼
     Serial.println(F("Card read previously."));
   }
 
   rfid.PICC_HaltA();   // Halt PICC
   rfid.PCD_StopCrypto1();   // Stop encryption on PCD
 
+  if (!fitnessStartOrEndFlag) { //블루투스연결은 상관 없이 운동중이지만 않을때 초기 디스플레이를 보여줘야 한다.
+    initTFTDisplay();
+    // 사용자가 태그를 찍었지만 운동을 하지 않을 경우를 생각해야함 .
+    // 즉 태그만 찍고 운동을 시작하지 않고 그냥 내겨간 경우
+  }
 }
 
+void checkTFTDisplay(long * currerntMillis) {
+  if (*currerntMillis - rfidContactedTime >= 60000) { // 1분이 지나면
+    if (userRFIDCheckFlag) { // 사용자 태그가 인식된 상태이면
+      if (!fitnessStartOrEndFlag) { // 사용자 태그가 인식된 상태이지만 운동중이지 않을때
+        userRFIDCheckFlag = false; // 초기화
+        initTFTDisplay();
+      }
+    }
+  }
+}
 
 void initTFTDisplay() {
   // Use this initializer if you're using a 1.8" TFT
-  tft.initR(INITR_BLACKTAB);   // initialize a ST7735S chip, black tab
-  //  Serial.println("Initialized");
+  tft.initR(INITR_BLACKTAB);   // initialize a ST7735S chip, black ta
   tft.fillScreen(ST77XX_BLACK);
   tft.invertDisplay(true);
+  tft.setTextWrap(true);
+  tft.setCursor(10, 10);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Hello");
+
+  String message = "";
+  if (userRFIDCheckFlag) {
+    for (int i = 0; i < 4; i++) {
+      message +=  nuidPICC[i];
+    }
+  } else { // 인식되어 있지 않다면
+    message = "Please contact your Tag before start workout";
+  }
+
+  tft.setCursor(0, 30);
+  tft.setTextSize(2);
+  tft.println(message);
+}
+
+void  workoutDoneDisplay() {
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(5, 10);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Autometic Save");
+  String message = "Workout Done!";
+  tft.setCursor(5, 50);
+  tft.setTextSize(2);
+  tft.println(message);
 }
 
 void displaySet(long * currerntMillis) {
@@ -352,16 +429,24 @@ void displaySet(long * currerntMillis) {
     int lcdModulo = lcdCnt % 4 ;
     switch (lcdModulo) {
       case 0:
-        tftPrintTest3();
+        // 사용자 태그 확인 디스플레이
+        //        tftPrintTest3();
+        tftPrintCheckUser();
         break;
       case 1:
-        tftPrintTest4();
+        // 현재 운동 속도 디스플레이
+        //        tftPrintTest4();
+        tftPrintNowSpeed();
         break;
       case 2:
-        tftPrintTest2();
+        // 운동 거리  디스플레이
+        //        tftPrintTest2();
+        tftPrintDistance();
         break;
       case 3:
-        tftPrintTest3();
+        // 심박 수 디스플레이
+        //        tftPrintTest3();
+        tftPrintHeartRate();
         break;
     }
     lcdCnt++;
@@ -376,38 +461,22 @@ void testdrawtext(char *text, uint16_t color) {
   tft.print(text);
 }
 
-void tftPrintTest2() {
-  tft.setTextWrap(true);
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(0, 10);
-  //이동 거리
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(1);
-  tft.print("Distance");
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(2);
-  tft.println("1.6 km");
+/**
+   심박수 디스플레이
+*/
+void tftPrintHeartRate() { //심박수 디스플레이 함수
 
-  // 현재 속도
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(1);
-  tft.print("Speed");
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(2);
-  tft.println("5.0 km/h");
+  String message = "";
+  if (!heartRateMeasureFlag && !heartRateLocationFlag) { // 부착중이지 않고 올바른 위치에 있지 않을때
+    message = "E400"; // 에러코드 400
+  }
+  else if (heartRateMeasureFlag && !heartRateLocationFlag) { // 부착 중이지만 올바른 값이 아닐때
+    message = "E401"; //에러코드 401
+  }
+  else if (heartRateMeasureFlag && heartRateLocationFlag) { //모든 조건이 만족됬을때
+    message = String(globalHeartRate);
+  }
 
-  //심박수
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(2);
-  tft.print("HR : ");
-  tft.setTextSize(2);
-  tft.print("89");
-  tft.setTextSize(1);
-  tft.println("bpm");
-
-}
-
-void tftPrintTest3() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
   tft.setCursor(5, 20);
@@ -416,13 +485,50 @@ void tftPrintTest3() {
   tft.println("Heart Rate");
   tft.setCursor(5, 40);
   tft.setTextSize(5);
-  tft.println("74");
+  tft.println(message);
   tft.setCursor(5, 85);
   tft.setTextSize(2);
   tft.println("bpm");
 }
 
-void tftPrintTest4() {
+void tftPrintCheckUser() {
+
+  String message = "";
+  //만약 사용자 태그가 인식되어 있다면
+  if (userRFIDCheckFlag) {
+    for (int i = 0; i < 4; i++) {
+      message +=  nuidPICC[i];
+    }
+  } else { // 인식되어 있지 않다면
+    message = "Please Contact Your ID Tag";
+  }
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(5, 20);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Tag Info");
+  tft.setCursor(5, 40);
+  tft.setTextSize(2);
+  tft.println(message);
+}
+
+void tftPrintDistance() {
+  tft.setTextWrap(true);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(5, 20);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("Distance");
+  tft.setCursor(5, 40);
+  tft.setTextSize(5);
+  tft.println(distanceUnitKm);
+  tft.setCursor(5, 85);
+  tft.setTextSize(2);
+  tft.println("km");
+}
+
+void tftPrintNowSpeed() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
   tft.setCursor(5, 20);
@@ -431,7 +537,7 @@ void tftPrintTest4() {
   tft.println("Speed");
   tft.setCursor(5, 40);
   tft.setTextSize(5);
-  tft.println("5.0");
+  tft.println(roundSpeed);
   tft.setCursor(5, 85);
   tft.setTextSize(2);
   tft.println("km/h");
