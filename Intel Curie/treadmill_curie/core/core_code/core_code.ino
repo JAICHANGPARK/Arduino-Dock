@@ -45,6 +45,7 @@
 
 #define MAGNET_INTERRUPT_PIN          2
 #define BLE_LED_INDICATOR_PIN         3
+#define DIGITAL_PIN_RESERVED          4
 #define RFID_RST_PIN                  5
 #define RFID_SS_PIN                   6
 #define TFT_DC                        7
@@ -65,6 +66,8 @@ volatile float distanceUnitKm = 0.0f; // 거리 변수 [km]
 volatile float speedNow = 0.0f;       // 순간 속도 변수 [km/h]
 volatile uint16_t uintSpeedNow = 0;
 volatile uint32_t uintTotalDistance = 0;
+
+volatile float roundSpeed = 0.0f;    // 반올림한 속도 변수 저장 .
 
 /*************** 평균 운동량 정보 처리 변수    ****************************/
 volatile uint16_t uintDistanceKm = 0;
@@ -208,24 +211,29 @@ void loop() {
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
 
-#ifdef DEBUG
-      Serial.println("블루투스 연결되어 있지 않지만 운동중입니다.");
-      Serial.print("count -> "); Serial.print(count);
-      Serial.print("| distance -> "); Serial.print(distance);
-      Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
-      Serial.print("| diffTime -> "); Serial.print(diffTime);
-      Serial.print("| InstantTime -> "); Serial.print(InstantTime);
-      Serial.print("| speedNow -> "); Serial.println(speedNow);
-#endif
-      //운동  종료 처리 !
-      if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {
+
+      if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {//500 ms 이상 인터럽트 발생 없다면 운동  종료 처리 !
 #ifdef DEBUG
         Serial.println("운동종료");
+        fitnessStartOrEndFlag = false;
         count = 0;
         for (int i = 0; i < 4 ; i ++) {
           nuidPICC[i] = 0xff;
         }
 #endif
+      } else { //블루투스 연결되어 있지 않지만 운동중입니다.
+#ifdef DEBUG
+        Serial.println("블루투스 연결되어 있지 않지만 운동중입니다.");
+        Serial.print("count -> "); Serial.print(count);
+        Serial.print("| distance -> "); Serial.print(distance);
+        Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
+        Serial.print("| diffTime -> "); Serial.print(diffTime);
+        Serial.print("| InstantTime -> "); Serial.print(InstantTime);
+        Serial.print("| speedNow -> "); Serial.print(speedNow);
+        Serial.print("| roundSpeed -> "); Serial.println(roundSpeed);
+
+#endif
+
       }
 
     } else { //블루투스 연결되어 있지 않은 상태에서 운동 중이지 않다면, (== 운동중이지 않을때)
@@ -258,6 +266,7 @@ void loop() {
         // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행
       }
 #endif
+      delay(1000);
     }
   }
 
@@ -267,10 +276,10 @@ void loop() {
   //  } else {
   //
   //  }
-  
+
   rfid_address_read(); // RFID 아이디를 읽는다.
   displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
-  
+
 }
 
 void rfid_address_read() {
@@ -370,37 +379,62 @@ void testdrawtext(char *text, uint16_t color) {
 void tftPrintTest2() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(10, 10);
+  tft.setCursor(0, 10);
+  //이동 거리
   tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(2);
-  tft.println("Distance");
+  tft.setTextSize(1);
+  tft.print("Distance");
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(2);
   tft.println("1.6 km");
+
+  // 현재 속도
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.print("Speed");
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.println("5.0 km/h");
+
+  //심박수
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.print("HR : ");
+  tft.setTextSize(2);
+  tft.print("89");
+  tft.setTextSize(1);
+  tft.println("bpm");
+
 }
 
 void tftPrintTest3() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(10, 10);
+  tft.setCursor(5, 20);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(2);
-  tft.println("HR");
-  tft.setTextColor(ST77XX_WHITE);
+  tft.println("Heart Rate");
+  tft.setCursor(5, 40);
+  tft.setTextSize(5);
+  tft.println("74");
+  tft.setCursor(5, 85);
   tft.setTextSize(2);
-  tft.println("89 bpm");
+  tft.println("bpm");
 }
 
 void tftPrintTest4() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(10, 10);
+  tft.setCursor(5, 20);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(2);
   tft.println("Speed");
-  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(5, 40);
+  tft.setTextSize(5);
+  tft.println("5.0");
+  tft.setCursor(5, 85);
   tft.setTextSize(2);
-  tft.println("5.0 km/h");
+  tft.println("km/h");
 }
 
 //블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
