@@ -29,9 +29,14 @@ void uart_handle(uint32_t id, SerialIrq event) {
         rx_buf[rx_buf_num] = Serial.read();
         rx_buf_num++;
       }
-      else
+      else {
         Serial.read();
+      }
     }
+    for (int i = 0; i < rx_buf_num; i++) {
+      Serial.println(rx_buf[i], HEX);
+    }
+
   }
 }
 
@@ -60,7 +65,7 @@ void loop() {
   Serial.write(savaDataCountGetCommand, 7);
   delay(2000);
   digitalWrite(D13, LOW);
-//  Serial.write(serialNumberReadCommand, 7);
+  //  Serial.write(serialNumberReadCommand, 7);
   delay(2000);
 }
 
