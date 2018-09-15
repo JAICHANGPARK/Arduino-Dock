@@ -19,6 +19,7 @@
 
 BLE                                       ble;
 Timeout                                   timeout;
+Ticker                                    ticker;
 
 static uint8_t rx_buf[TXRX_BUF_LEN];
 static uint8_t rx_buf_num;
@@ -47,11 +48,38 @@ uint8_t echo[1] = {0x80};
 uint8_t serialNumberReadCommand[7] = {0x8b, 0x11, 0x20, 0x13, 0x24, 0x10, 0x2a};
 uint8_t savaDataCountGetCommand[7] = {0x8b, 0x11, 0x20, 0x18, 0x26, 0x10, 0x22};
 
+uint8_t getDataCommand[7] = {0x8b, 0x1d, 0x22, 0x10, 0x20, 0x10, 0x28};
+
 boolean fisrtPhase = false;
 boolean secondPhase = false;
 boolean thirdPhase = false;
 
 static uint8_t device_code_buf = 0;
+uint8_t saveCount = 0;
+int indexCount = 0;
+void flip() {
+  //    led2 = !led2;
+  if (!fisrtPhase) {
+    digitalWrite(D13, HIGH);
+    Serial.write(0x80);
+  }
+
+  if (!secondPhase) {
+    digitalWrite(D13, LOW);
+    Serial.write(serialNumberReadCommand, 7);
+    //    secondPhase = true;
+  }
+
+  if (!thirdPhase) {
+    Serial.write(savaDataCountGetCommand, 7);
+    //    thirdPhase = true;
+  } else {
+    if(indexCount > saveCount){
+      
+    }
+    Serial.write(getDataCommand, 7);
+  }
+}
 
 void disconnectionCallBack(const Gap::DisconnectionCallbackParams_t *params) {
   ble.startAdvertising();
@@ -113,6 +141,16 @@ void uart_handle(uint32_t id, SerialIrq event) {
       }
     }
 
+    if (secondPhase) {
+      if (!thirdPhase) {
+        if (rx_buf_num != 0) {
+          device_code_rx_buf[0] = (((rx_buf[1] & 0x0f) << 4 ) | (rx_buf[2] & 0x0f));
+          saveCount = device_code_rx_buf[0];
+          thirdPhase = true;
+          ticker.detach();
+        }
+      }
+    }
 
   }
 }
@@ -121,6 +159,7 @@ void setup() {
   // put your setup code here, to run once
   Serial.begin(9600);
   Serial.attach(uart_handle);
+  ticker.attach(&flip, 2.0);
 
   ble.init();
   ble.onDisconnection(disconnectionCallBack);
@@ -150,14 +189,15 @@ void loop() {
   // put your main code here, to run repeatedly:
   ble.waitForEvent();
 
-  digitalWrite(D13, HIGH);
-  Serial.write(0x80);
-  delay(2000);
-  digitalWrite(D13, LOW);
-  Serial.write(serialNumberReadCommand, 7);
-  delay(2000);
-  Serial.write(savaDataCountGetCommand, 7);
-  delay(2000);
+
+  //  digitalWrite(D13, HIGH);
+  //  Serial.write(0x80);
+  //  delay(2000);
+  //  digitalWrite(D13, LOW);
+  //  Serial.write(serialNumberReadCommand, 7);
+  //  delay(2000);
+  //  Serial.write(savaDataCountGetCommand, 7);
+  //  delay(2000);
 
 }
 
