@@ -161,36 +161,35 @@ void uart_handle(uint32_t id, SerialIrq event) {
 
     if (!fisrtPhase) { // 첫번째 프로토콜 시작
       if (rx_buf[0] == 0x80 && rx_buf[1] == 0x10 && rx_buf[2] == 0x20) { // 올바른 값이 들어온다면
-        device_code_rx_buf[0] = 0x10;
+        data_rx_buf[0] = 0x10;
         fisrtPhase = true;
-
-        ble.updateCharacteristicValue(characteristic4.getValueAttribute().getHandle(), device_code_rx_buf, 1);
-      }
-      return ;
+        ble.updateCharacteristicValue(characteristic4.getValueAttribute().getHandle(), data_rx_buf, 1);
+        return ;
+      }  
     } else { // 첫번째 프로토콜이 검증됬다면
       if (!secondPhase) { // 두번째 프로토콜 시작
         device_code_rx_buf[0] = (((rx_buf[13] & 0x0f) << 4 ) | (rx_buf[14] & 0x0f));
         timeout1.attach_us(d_uart_rx_handle, 100000);
-        //        ble.updateCharacteristicValue(characteristic5.getValueAttribute().getHandle(), device_code_rx_buf, 1);
+        ble.updateCharacteristicValue(characteristic5.getValueAttribute().getHandle(), device_code_rx_buf, 1);
         if (device_code_rx_buf[0] == 0x02) {
           secondPhase = true;
+          return ;
         }
-        return ;
       }
       else {
         if (!thirdPhase) {
           save_data_rx_buf[0] = (((rx_buf[1] & 0x0f) << 4 ) | (rx_buf[2] & 0x0f));
           saveCount = save_data_rx_buf[0];
-          timeout2.attach_us(c_uart_rx_handle, 100000);
-          //          ble.updateCharacteristicValue(characteristic6.getValueAttribute().getHandle(), device_code_rx_buf, 1);
+          //          timeout2.attach_us(c_uart_rx_handle, 100000);
+          ble.updateCharacteristicValue(characteristic6.getValueAttribute().getHandle(), save_data_rx_buf, 1);
           thirdPhase = true;
           return ;
         }
       }
     }
     if (fisrtPhase && secondPhase && thirdPhase) {
-      device_code_rx_buf[0] = rx_buf_num;
-      
+      data_rx_buf[0] = rx_buf_num;
+      ble.updateCharacteristicValue(characteristic7.getValueAttribute().getHandle(), save_data_rx_buf, 1);
     }
 
   }
