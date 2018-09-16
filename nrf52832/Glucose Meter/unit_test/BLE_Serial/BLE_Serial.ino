@@ -48,9 +48,9 @@ uint8_t rx_value[TXRX_BUF_LEN] = {0,};
 GattCharacteristic  characteristic1(service1_tx_uuid, tx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE_WITHOUT_RESPONSE );
 GattCharacteristic  characteristic2(service1_rx_uuid, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY);
 GattCharacteristic  characteristic3(service1_rx_uuid_2, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY);
-GattCharacteristic  characteristic4(service1_uuid_0, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ );
-GattCharacteristic  characteristic5(service1_uuid_1, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ );
-GattCharacteristic  characteristic6(service1_uuid_2, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ );
+GattCharacteristic  characteristic4(service1_uuid_0, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY );
+GattCharacteristic  characteristic5(service1_uuid_1, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY );
+GattCharacteristic  characteristic6(service1_uuid_2, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY );
 
 GattCharacteristic *uartChars[] = {&characteristic1, &characteristic4, &characteristic5, &characteristic6, &characteristic2, &characteristic3};
 GattService         uartService(service1_uuid, uartChars, sizeof(uartChars) / sizeof(GattCharacteristic *));
@@ -59,9 +59,9 @@ GattCharacteristic  characteristic7(service2_tx_uuid, rx_value, 1, TXRX_BUF_LEN,
 GattCharacteristic  *uartChars2[] = {&characteristic7};
 GattService         uartService2(service2_uuid, uartChars2, sizeof(uartChars2) / sizeof(GattCharacteristic *));
 
-uint8_t echo[1] = {0x80};
-uint8_t serialNumberReadCommand[7] = {0x8b, 0x11, 0x20, 0x13, 0x24, 0x10, 0x2a};
-uint8_t savaDataCountGetCommand[7] = {0x8b, 0x11, 0x20, 0x18, 0x26, 0x10, 0x22};
+uint8_t echo[1] = {0x80}; //echo
+uint8_t serialNumberReadCommand[7] = {0x8b, 0x11, 0x20, 0x13, 0x24, 0x10, 0x2a}; // 0x103b
+uint8_t savaDataCountGetCommand[7] = {0x8b, 0x11, 0x20, 0x18, 0x26, 0x10, 0x22}; // 0x1086
 
 uint8_t getDataCommand[7] = {0x8b, 0x1d, 0x22, 0x10, 0x20, 0x10, 0x28};
 
@@ -165,7 +165,7 @@ void uart_handle(uint32_t id, SerialIrq event) {
         fisrtPhase = true;
         ble.updateCharacteristicValue(characteristic4.getValueAttribute().getHandle(), data_rx_buf, 1);
         return ;
-      }  
+      }
     } else { // 첫번째 프로토콜이 검증됬다면
       if (!secondPhase) { // 두번째 프로토콜 시작
         device_code_rx_buf[0] = (((rx_buf[13] & 0x0f) << 4 ) | (rx_buf[14] & 0x0f));
