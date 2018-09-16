@@ -8,6 +8,8 @@
 #define PROTOCOL_ONE_THIRD_PHASE_LENGTH   6
 #define PROTOCOL_ONE_FORTH_PHASE_LENGTH   24
 
+#define GLUCOSE_DATA_SIZE                 8
+
 BLE                                       ble;
 Timeout                                   timeout, timeout1, timeout2;
 Ticker                                    ticker;
@@ -74,19 +76,43 @@ static uint8_t data_rx_buf[1];
 static uint8_t data_count[1];
 uint8_t myCount = 0;
 
-uint8_t dataBuffer[250][24];
 
+uint8_t buff_01[PROTOCOL_ONE_FIRTS_PHASE_LENGTH];
+uint8_t buff_02[PROTOCOL_ONE_SECOND_PHASE_LENGTH];
+uint8_t buff_03[PROTOCOL_ONE_THIRD_PHASE_LENGTH];
+uint8_t buff_04[PROTOCOL_ONE_FORTH_PHASE_LENGTH];
 
+uint8_t dataBuffer[250][GLUCOSE_DATA_SIZE];
+
+uint16_t startAddress = 0xD200;
+
+int matrixCount  = 0 ;
+boolean sendFlag = false;
+
+uint8_t mYears = 0;
+uint8_t mMonth = 0;
+uint8_t mDay = 0;
+uint8_t mHour = 0;
+uint8_t mMin = 0;
+uint8_t mSecond = 0;
+uint8_t glucoseValueL = 0;
+uint8_t glucoseValueH = 0;
+
+int updataCount = 0;
 void flip() {
   //  digitalWrite(D13, HIGH);
   //  delay(500);
   //  digitalWrite(D13, LOW);
   //  delay(500);
-  data_count[0] = myCount;
-  ble.updateCharacteristicValue(characteristic3.getValueAttribute().getHandle(), data_count, 1);
-  myCount++;
-
-  Serial.write(saveCount);
+  //  data_count[0] = myCount;
+  //  ble.updateCharacteristicValue(characteristic3.getValueAttribute().getHandle(), data_count, 1);
+  //  myCount++;
+  if (updataCount > saveCount) {
+    updataCount = 0;
+  } else {
+    ble.updateCharacteristicValue(characteristic3.getValueAttribute().getHandle(), dataBuffer[updataCount], GLUCOSE_DATA_SIZE);
+    updataCount++;
+  }
 }
 
 void disconnectionCallBack(const Gap::DisconnectionCallbackParams_t *params) {
@@ -177,7 +203,7 @@ void firstPhaseFunction() {
   Serial.write(0x80);
   while (Serial.available()) {
     if (rx_buf_num < PROTOCOL_ONE_FIRTS_PHASE_LENGTH) {
-      rx_buf[rx_buf_num] = Serial.read();
+      buff_01[rx_buf_num] = Serial.read();
       rx_buf_num++;
     } else {
       Serial.read();
@@ -185,37 +211,34 @@ void firstPhaseFunction() {
     }
   }
   for (int i = 0; i < rx_buf_num; i++) {
-    Serial.write(rx_buf[i]);
+    Serial.write(buff_01[i]);
   }
+
   Serial.println("");
-  if (rx_buf_num == 3) {
-    if (rx_buf[0] == 0x80 && rx_buf[1] == 0x10 && rx_buf[2] == 0x20) { // rx_buf[0] == 0x80 && rx_buf[1] == 0x10 && rx_buf[2] == 0x20 프로토콜 1
+  if (rx_buf_num == PROTOCOL_ONE_FIRTS_PHASE_LENGTH) {
+    if (buff_01[0] == 0x80 && buff_01[1] == 0x10 && buff_01[2] == 0x20) { // rx_buf[0] == 0x80 && rx_buf[1] == 0x10 && rx_buf[2] == 0x20 프로토콜 1
       protocolOneFlag = true;
       fisrtPhase = true;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
     }
-    else if (rx_buf[0] == 0x80 && rx_buf[1] == 0x1E && rx_buf[2] == 0x2E) {
+    else if (buff_01[0] == 0x80 && buff_01[1] == 0x1E && buff_01[2] == 0x2E) {
       protocolThreeFlag = true;
       fisrtPhase = true;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
-      //      rx_buf_num = 0;
-      //      timeout.attach(m_uart_rx_handle, 1.0);
-      //      ticker.attach(&flip, 1.0);
     } else {
       fisrtPhase = true;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
+      //      memset(rx_buf, 0x00, 30);
     }
   }
 }
+
 void secondPhaseFunction() {
   digitalWrite(D13, LOW);
   Serial.write(serialNumberReadCommand, 7);
   while (Serial.available()) {
     if (rx_buf_num < PROTOCOL_ONE_SECOND_PHASE_LENGTH) {
-      rx_buf[rx_buf_num] = Serial.read();
+      buff_02[rx_buf_num] = Serial.read();
       rx_buf_num++;
     } else {
       Serial.read();
@@ -223,16 +246,15 @@ void secondPhaseFunction() {
     }
   }
   for (int i = 0; i < rx_buf_num; i++) {
-    Serial.write(rx_buf[i]);
+    Serial.write(buff_02[i]);
   }
   Serial.println("");
   if (rx_buf_num == PROTOCOL_ONE_SECOND_PHASE_LENGTH) {
 
-    device_code_rx_buf[0] = (((rx_buf[13] & 0x0f) << 4 ) | (rx_buf[14] & 0x0f));
+    device_code_rx_buf[0] = (((buff_02[13] & 0x0f) << 4 ) | (buff_02[14] & 0x0f));
     if (device_code_rx_buf[0] == 0x02) { // 멕시마인경우
       secondPhase = true;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
       //      ticker.attach(&flip, 1.0);
     }
   }
@@ -246,7 +268,7 @@ void ThridPhaseFunction() {
   Serial.write(savaDataCountGetCommand, 7);
   while (Serial.available()) {
     if (rx_buf_num < PROTOCOL_ONE_THIRD_PHASE_LENGTH) {
-      rx_buf[rx_buf_num] = Serial.read();
+      buff_03[rx_buf_num] = Serial.read();
       rx_buf_num++;
     } else {
       Serial.read();
@@ -254,34 +276,53 @@ void ThridPhaseFunction() {
     }
   }
   for (int i = 0; i < rx_buf_num; i++) {
-    Serial.write(rx_buf[i]);
+    Serial.write(buff_03[i]);
   }
   Serial.println("");
   if (rx_buf_num == PROTOCOL_ONE_THIRD_PHASE_LENGTH) {
 
-    device_code_rx_buf[0] = (((rx_buf[1] & 0x0f) << 4 ) | (rx_buf[2] & 0x0f));
+    device_code_rx_buf[0] = (((buff_03[1] & 0x0f) << 4 ) | (buff_03[2] & 0x0f));
     if (device_code_rx_buf[0] != 0x00) {  // 저장된 데이터의 개수가 0개가 아니라면
       saveCount = device_code_rx_buf[0];
       thirdPhase = true;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
-      ticker.attach(&flip, 1.0);
+      //      memset(rx_buf, 0x00, 30);
+      //      ticker.attach(&flip, 1.0);
     } else {
       thirdPhase = false;
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
+      //      memset(rx_buf, 0x00, 30);
     }
   }
 }
-int matrixCount  = 0 ;
-boolean sendFlag = false;
+
+
+
 void FourthPhaseFunction() {
+
   uint8_t tmpGetDataCommand[7] = {0x8b, 0x1d, 0x22, 0x10, 0x20, 0x10, 0x28};
+
+  uint8_t topAddress = (startAddress >> 12) & 0x0f;
+  uint8_t topAddressDataCommand = (0x10 | topAddress);
+  uint8_t top2Address = (startAddress >> 8) & 0x0f;
+  uint8_t top2AddressDataCommand =  (0x20 | top2Address);
+
+  uint8_t bottomAddress = (startAddress >> 4) & 0x0f;
+  uint8_t bottomAddressDataCommand = (0x10 | bottomAddress);
+  uint8_t bottom2Address = (startAddress & 0x000f);
+  uint8_t bottom2AddressDataCommand = (0x20 | bottom2Address);
+
+  tmpGetDataCommand[1] = topAddressDataCommand;
+  tmpGetDataCommand[2] = top2AddressDataCommand;
+  tmpGetDataCommand[3] = bottomAddressDataCommand;
+  tmpGetDataCommand[4] = bottom2AddressDataCommand;
+
   digitalWrite(D13, HIGH);
   Serial.write(tmpGetDataCommand, 7);
+
   while (Serial.available()) {
     if (rx_buf_num < PROTOCOL_ONE_FORTH_PHASE_LENGTH) {
-      rx_buf[rx_buf_num] = Serial.read();
+      buff_04[rx_buf_num] = Serial.read();
       rx_buf_num++;
     } else {
       Serial.read();
@@ -289,21 +330,56 @@ void FourthPhaseFunction() {
     }
   }
 
-  Serial.println("");
+  //  Serial.println("");
 
   if (rx_buf_num == PROTOCOL_ONE_FORTH_PHASE_LENGTH) { // 24개의 데이터가 들어왔다면
-    if (matrixCount == saveCount) { //모든 데이터 저장 의미
+    sendFlag = false;
+    if (matrixCount > saveCount) { //모든 데이터 저장 의미
+      digitalWrite(D4, HIGH); // 모든 프로세스 완료 인디케이터 
+      Serial.print("matrixCount --> "); Serial.println(matrixCount, HEX);
       fourPhase = true;  //
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
+      ticker.attach(&flip, 1.0);
+      //      memset(rx_buf, 0x00, 30);
     } else {
+      int cnt = 0;
+      uint8_t mYears = (((buff_04[1] & 0x0f) << 4 ) | (buff_04[2] & 0x0f));
+      uint8_t mMonth = (((buff_04[4] & 0x0f) << 4 ) | (buff_04[5] & 0x0f));
+      uint8_t mDay = (((buff_04[7] & 0x0f) << 4 ) | (buff_04[8] & 0x0f));
+      uint8_t mHour = (((buff_04[10] & 0x0f) << 4 ) | (buff_04[11] & 0x0f));
+      uint8_t mMin = (((buff_04[13] & 0x0f) << 4 ) | (buff_04[14] & 0x0f));
+      uint8_t mSecond = (((buff_04[16] & 0x0f) << 4 ) | (buff_04[17] & 0x0f));
+      uint8_t glucoseValueL = (((buff_04[19] & 0x0f) << 4 ) | (buff_04[20] & 0x0f));
+      uint8_t glucoseValueH = (((buff_04[22] & 0x0f) << 4 ) | (buff_04[23] & 0x0f));
+
+      Serial.print("startAddress --> "); Serial.println(startAddress, HEX);
+      Serial.print("matrixCount --> "); Serial.println(matrixCount, HEX);
+      Serial.print("mYears --> "); Serial.println(mYears, HEX);
+      Serial.print("mMonth --> "); Serial.println(mMonth, HEX);
+      Serial.print("mDay --> "); Serial.println(mDay, HEX);
+      Serial.print("mHour --> "); Serial.println(mHour, HEX);
+      Serial.print("mMin --> "); Serial.println(mMin, HEX);
+      Serial.print("mSecond --> "); Serial.println(mSecond, HEX);
+      Serial.print("glucoseValueL --> "); Serial.println(glucoseValueL, HEX);
+      Serial.print("glucoseValueH --> "); Serial.println(glucoseValueH, HEX);
+      dataBuffer[matrixCount][cnt++] =  mYears;
+      dataBuffer[matrixCount][cnt++] =  mMonth;
+      dataBuffer[matrixCount][cnt++] =  mDay;
+      dataBuffer[matrixCount][cnt++] =  mHour;
+      dataBuffer[matrixCount][cnt++] =  mMin;
+      dataBuffer[matrixCount][cnt++] =  mSecond;
+      dataBuffer[matrixCount][cnt++] =  glucoseValueL;
+      dataBuffer[matrixCount][cnt++] =  glucoseValueH;
+      cnt = 0;
       for (int i = 0; i < rx_buf_num; i++) {
-        Serial.write(rx_buf[i]);
-        dataBuffer[matrixCount][i] =  rx_buf[i];
+        Serial.print(i); Serial.println(buff_04[i], HEX);
+//        dataBuffer[matrixCount][i] =  buff_04[i];
       }
+
       matrixCount++;
+      startAddress  += 8;
+      //      memset(rx_buf, 0x00, 30);
       rx_buf_num = 0;
-      memset(rx_buf, 0x00, 30);
     }
     //    device_code_rx_buf[0] = (((rx_buf[1] & 0x0f) << 4 ) | (rx_buf[2] & 0x0f));
     //    if (device_code_rx_buf[0] != 0x00) {  // 저장된 데이터의 개수가 0개가 아니라면
@@ -317,6 +393,8 @@ void FourthPhaseFunction() {
     //      rx_buf_num = 0;
     //      memset(rx_buf, 0x00, 30);
     //    }
+  } else {
+
   }
 
 }
@@ -326,7 +404,7 @@ void setup() {
   Serial.begin(9600);
   //  Serial.attach(uart_handle);
   //ticker.attach(&flip, 1);
-
+  pinMode(D4, OUTPUT);
   ble.init();
   ble.onDisconnection(disconnectionCallBack);
   ble.onDataWritten(gattServerWriteCallBack);
@@ -382,25 +460,36 @@ void loop() {
 
     else if (fisrtPhase && secondPhase && thirdPhase && !fourPhase) { // 모든 조건을 충족했다면 데이터 읽기 과정 처리
       FourthPhaseFunction();
+      Serial.print("saveCount --> "); Serial.println(saveCount);
+      Serial.print("fourPhase --> "); Serial.println(fourPhase);
     }
 
     else if (fisrtPhase && secondPhase && thirdPhase && fourPhase) { // 모든 조건을 충족했다면 데이터 읽기 과정 처리
       if (saveCount != 0) {
-        for (int i = 0; i < saveCount; i++) {
-          Serial.write(0x02);
-          for (int k = 0; k < 24; k++) {
-            Serial.write(dataBuffer[i][k]);
-          }
-          Serial.write(0x03);
-        }
+        //        for (int i = 0; i < saveCount; i++) {
+        //          Serial.println("");
+        //          for (int k = 0; k < 24; k++) {
+        //            Serial.write(dataBuffer[i][k]);
+        //          }
+        //          Serial.println("");
+        //
+        //        }
+        //        Serial.println("Data Pharse Done --> ");
+        //        Serial.print("mMonth --> "); Serial.println(mMonth, HEX);
+        //        Serial.print("mDay --> "); Serial.println(mDay, HEX);
+        //        Serial.print("mHour --> "); Serial.println(mHour, HEX);
+        //        Serial.print("mMin --> "); Serial.println(mMin, HEX);
+        //        Serial.print("mSecond --> "); Serial.println(mSecond, HEX);
+        //        Serial.print("glucoseValueL --> "); Serial.println(glucoseValueL, HEX);
+        //        Serial.print("glucoseValueH --> "); Serial.println(glucoseValueH, HEX);
+        
+        ble.waitForEvent();
+
       }
+      //      delay(1000);
     }
-    else {
-      ble.waitForEvent();
-    }
+
   }
 
   // put your main code here, to run repeatedly:
 }
-
-

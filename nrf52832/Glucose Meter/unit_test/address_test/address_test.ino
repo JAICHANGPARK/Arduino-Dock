@@ -27,5 +27,7 @@ void loop() {
   Serial.println(bottom2AddressDataCommand, HEX);
   delay(1000);
 
+  startAddress  += 8;
+
 
 }
