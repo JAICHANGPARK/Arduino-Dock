@@ -128,11 +128,9 @@ void setup() {
   n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
   dump(buf, 256); // 읽어온 데이터를 확인하는 함수
 
-  Serial.print("d : "); Serial.print("메모리값 확인하기");
-  Serial.print("e : "); Serial.print("메모리값 확인하기");
-
-
-
+  Serial.print("d : "); Serial.println("메모리값 확인하기");
+  Serial.print("e : "); Serial.println("메모리값 삭제하기");
+  
 }
 
 void loop() {
@@ -548,6 +546,7 @@ void serialEvent() {
       subSectorErase(INFO_ADDRESS);
       writeEnable();
       subSectorErase(BASE_ADDRESS);
+      
       writeEnable();
       n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
       dump(buf, 256); // 읽어온 데이터를 확인하는 함수

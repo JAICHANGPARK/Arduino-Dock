@@ -19,6 +19,8 @@ void interrupt_func() {
     distance = (TREADMILL_DISTANCE * count); // 총 이동 거리 --> 단위 넣을것
     distanceUnitKm = distance / 1000.0f; // 단위 km
 
+    uintDistanceKm = (distanceUnitKm * 100);  // 100 곱해진 거리구한다.
+    
     diffTime = interrupt_time - t; // millisecond의 시간차를 확인한다.
 
     InstantTime = (float)(interrupt_time - t) / 1000.0f;  // 과거의 시간과 현재의 시간을 뺀다.
@@ -29,6 +31,12 @@ void interrupt_func() {
     workoutTime = interrupt_time - startFitnessTime;
     float tmpRoundSpeed  = round(speedNow * 10.0f);
     roundSpeed = tmpRoundSpeed / 10.0;  // 소수 2째 자리 반올림.
+
+
+    //평균 구하기위한 더하기 연산
+    sumSpeed += roundSpeed;   //속도 합 (실내자전거와 드르게 반올림된 속도값을 저장한다.)
+    sumDistanceKm += uintDistanceKm; // 거리합 km를 100 곱한 값 uintDistanceKm는 100 곱해진 km 거리 값이다.
+
 
     t = millis(); //시간 저장
 
