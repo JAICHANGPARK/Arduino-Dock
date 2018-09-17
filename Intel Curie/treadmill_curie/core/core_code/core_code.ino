@@ -1,8 +1,12 @@
 /*
       made by : JAICHANGPARK aka DREAMWALKER
-      인텔 큐리 보드 사용
-      32비트 쿼크 코어
+      인텔 큐리 보드 사용(32비트 쿼크 코어)
+      
+      당뇨병 환자를 위한 운동부하기 자동기록 모듈 
       트레드밀 (KNU TM0)
+      
+      1. 최종 제작시에는 DEBUG 메그로는 주석처리 하세요.
+      2. 트레드밀 적용시 INDOOR_BIKE 메크로는 주석 처리 하세요
 */
 
 #include <CurieTime.h>
@@ -18,19 +22,25 @@
 #define TREADMILL
 #define INDOOR_BIKE
 
-
-
+/***************System Const Const ****************************/
 #define TREADMILL_DISTANCE            0.13F         //단위 m 
+
+#define KIND_LITE_WORK                0x10;         //  느리게 걷기
+#define KIND_NORMAL_WORK              0x11;         // 일반 걷기
+#define KIND_FAST_WORK                0x12;         // 빠르게 걷기
+#define KIND_RUNNING                  0x20;         // 달리기
+
+#define MAX_AES_PROCESS               32
+#define HR_ADDR                       0xA0          //심박 센서 주소 
+
+/***************System Time Const ****************************/
 #define WORKOUT_DONE_TIME_MILLIS      500           // 운동 자동 종료 시간 500ms후 모든 정보 초기화 및 변수 저장.
 #define REAL_TIME_SEND_INTERVAL       1000          // 실시간 운동 시 1초 간격으로 데이터를 보내도록 .
 #define ONE_SECOND                    1000
 #define ONE_MINUTE                    (60 *1000)
 #define CAL_MINUTE(X)                 (X * ONE_MINUTE)
 
-#define MAX_AES_PROCESS               32
-
-#define HR_ADDR                       0xA0    //심박 센서 주소 
-
+/***************Address and 1 Unit Save Size Macro  ****************************/
 #define INFO_ADDRESS                  0x00000000  // 기본 정보 저장 메모리 시작 주소
 #define BASE_ADDRESS                  0x00001000  // 운동 정보 저장 메모리 주소 (종료 시 저장되는 곳)
 #define DETAIL_ADDRESS                0x00170000  // 상세 운동 정보 저장 메모리 시작 주소 
@@ -38,6 +48,7 @@
 #define SAVE_UNIT_STEP                22      // 메모리 저장 스탭 크기
 #define SAVE_FITNESS_BUFFER_SIZE      22      // 1단위 데이터 저장 버퍼 크기
 
+/*************** Serial Flash Macro   ****************************/
 #define COMMAND_WRITE_ENABLE          (byte)0x06
 #define COMMAND_RANDOM_READ           (byte)0x03
 #define COMMAND_FAST_READ             (byte)0x0B
@@ -55,9 +66,7 @@
 #define SR1_WEN_MASK                  0x02
 #define CMD_PAGEPROG                  0x02
 
-/*******************************************************
-   Pin Mecro
- *******************************************************/
+/***************  Pin Mecro ****************************/
 #define MAGNET_INTERRUPT_PIN          2
 #define BLE_LED_INDICATOR_PIN         3
 #define DIGITAL_PIN_RESERVED          4
@@ -68,7 +77,7 @@
 #define TFT_CS                        9
 #define FLASH_CHIP_SELECT_PIN         10
 
-
+/*************** ISR Variables    ****************************/
 volatile uint32_t count = 0;          // 인터럽트 클럭 카운트 수
 volatile float distance = 0.0f;       // 거리 변수 [ m]
 volatile float distanceUnitKm = 0.0f; // 거리 변수 [km]
@@ -212,6 +221,7 @@ void setup() {
 
 void loop() {
   BLE.poll();
+  
   long currentTimeIndicatorMillis = millis();
 
   if (deviceConnectedFlag) {      // 블루투스 연결은 되어 있는 상태
@@ -634,6 +644,11 @@ void tftPrintHeartRate() { //심박수 디스플레이 함수
   tft.println("bpm");
 }
 
+/**
+   사용자 테그 체크 디스플레이
+   테그 체크가 되었다면 테그 고유 주소를 디스플레이하며
+   그렇지 않은 경우는 테그를 찍어달라는 권유 메세지 
+*/
 void tftPrintCheckUser() {
 
   String message = "";
@@ -656,6 +671,9 @@ void tftPrintCheckUser() {
   tft.println(message);
 }
 
+/**
+   운동거리 디스플레이
+*/
 void tftPrintDistance() {
   tft.setTextWrap(true);
   tft.fillScreen(ST77XX_BLACK);
@@ -670,6 +688,10 @@ void tftPrintDistance() {
   tft.setTextSize(2);
   tft.println("km");
 }
+
+/**
+   현재 속도 디스플레이
+*/
 
 void tftPrintNowSpeed() {
   tft.setTextWrap(true);
@@ -707,7 +729,11 @@ void tftPrintWorkoutTime() {
 }
 
 
-//블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
+
+/**************************************************************
+ * 블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
+ * 
+ *************************************************************/
 void updateHeartRateLevel() {
   /* Read the current voltage level on the A0 analog input pin.
      This is used here to simulate the charge level of a battery.
@@ -722,9 +748,8 @@ void updateHeartRateLevel() {
   //indoorBikeData[2] = (uint8_t)((uint16_t)(speedNow * 100) >> 8 & 0xFF);
   //indoorBikeData[3] = (uint8_t)((uint16_t)(speedNow * 100) & 0xFF);
 #endif
+
 }
-
-
 /**
    심박센서로 심박수를 읽어오는 함수
    심박 센서와 i2c 통신이 필요하다.
