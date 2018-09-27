@@ -183,6 +183,12 @@ extern BLECharacteristic indorBikeChar;
 extern BLECharacteristic treadmillChar;
 extern BLECharacteristic heartRateMeansurement;
 
+extern BLECharacteristic syncChar;
+extern BLECharacteristic controlChar;
+extern BLECharacteristic authChar;
+extern BLECharacteristic dateTimeSyncChar;
+extern BLECharacteristic resultChar;
+
 void setup() {
 
 #ifdef DEBUG
@@ -226,6 +232,22 @@ void setup() {
     //기존 저장된 인덱스 보다 커야합니다.
   }
 
+  one_shot_register_index = readOneShotIndexFromEEPROM(); // 원샷 메로리 인덱스 읽어오기
+#ifdef DEBUG
+  Serial.print("상세 메모리 값 .");
+  Serial.println(one_shot_register_index);
+#endif
+  if (one_shot_register_index == 0xffffffff) {
+    one_shot_register_index = 0;
+  } else {
+    one_shot_register_index = one_shot_register_index + 1;
+  }
+
+#ifdef DEBUG
+  Serial.print("상세 메모리 처리 후  값 .");
+  Serial.println(one_shot_register_index);
+#endif
+
   dump(init_buff, 16);
 
   memset(buf, 0, 256);
@@ -233,11 +255,7 @@ void setup() {
   dump(buf, 256); // 읽어온 데이터를 확인하는 함수
 
 
-  one_shot_register_index = readOneShotIndexFromEEPROM();
-#ifdef DEBUG
-  Serial.print("상세 메모리 값 .");
-  Serial.println(one_shot_register_index);
-#endif
+
 }
 
 
@@ -286,8 +304,8 @@ void loop() {
 
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
-      // 시스템 시간 - 운동시간
-      if (currentTimeIndicatorMillis - workoutTimeOneShot >= 10000) { // 1분마다 저장하는 프로세스
+
+      if (currentTimeIndicatorMillis - workoutTimeOneShot >= ONE_MINUTE) { // 1분마다 저장하는 원샷 프로세스 
         //데이터 연산 처리 1분간 평균 데이터
         detachInterrupt(MAGNET_INTERRUPT_PIN);
         uint8_t buffConuter = 0;
@@ -321,7 +339,7 @@ void loop() {
         Serial.print("| workoutTimeOneShot --> " ); Serial.println(workoutTimeOneShot);
         Serial.println("----------------------------------------------------------------" );
 #endif
-        uint8_t oneShotfitnessDataBuff[SAVE_ONE_SHOT_BUFFER_SIZE]; // 상세 운동정보 저장을 위한 원샷 버퍼
+        uint8_t oneShotfitnessDataBuff[SAVE_ONE_SHOT_BUFFER_SIZE] = {0,}; // 상세 운동정보 저장을 위한 원샷 버퍼
 
         oneShotfitnessDataBuff[buffConuter++] = (uint8_t)((register_index >> 8) & 0xff);
         oneShotfitnessDataBuff[buffConuter++] = (uint8_t)(register_index & 0xff);
@@ -332,7 +350,8 @@ void loop() {
         oneShotfitnessDataBuff[buffConuter++] = (uint8_t)(meanOneShotDistance & 0xff);
         oneShotfitnessDataBuff[buffConuter++] = (meanOneShotHeartRate & 0xff);
 
-
+        writeEnable();  // 원샷 운동량 정보 쓰기
+        writeFitnessData(oneShotfitnessDataBuff, saveOneShotAddress, SAVE_ONE_SHOT_UNIT_STEP); // 원샷 운동량 정보 쓰기
 
         // 초기화 및 변수 저장
         one_shot_register_index++;
@@ -508,7 +527,8 @@ void loop() {
       unsigned char hr_test = readHeartRate(HR_ADDR);
 
       Serial.println("블루투스 연결되어 있지 않은 상태이고 운동 중이지 않습니다.");
-      Serial.print("register_index: "); Serial.println(register_index, HEX);
+      Serial.print("Register_index: "); Serial.println(register_index, HEX);
+      Serial.print("one_shot_register_index: "); Serial.println(one_shot_register_index, HEX);
       Serial.print("id: "); Serial.println(device_id, HEX);
       Serial.print("hr_first_check: "); Serial.println(hr_test, DEC);
 
@@ -529,6 +549,43 @@ void loop() {
         // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행
       }
 #endif
+
+      if (bleDateTimeSycnFlag  && bleAuthCheckFlag  && bleDataSyncFlag ) { //블루투스 연결되어 있지 않은 상태에서 운동 중이지 않을때 데이터 동기화 플래그 조건이 모두 성립된다면.
+        for (int i = 0; i < register_index; i++) {
+          uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE] = {0,};
+          uint32_t tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+#ifdef DEBUG
+          Serial.print("tmpAddress --> "); Serial.println(tmpAddress, HEX);
+#endif
+          //            n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 18개 데이터를 저장한다.
+          writeEnable();
+          digitalWrite(FLASH_CHIP_SELECT_PIN, LOW);
+          SPI.transfer(CMD_READ_DATA);
+          SPI.transfer(tmpAddress >> 16);
+          SPI.transfer((tmpAddress >> 8) & 0xff);
+          SPI.transfer(tmpAddress & 0xff);
+          for ( uint16_t k = 0; k < SAVE_UNIT_STEP; k++ ) {
+            syncBuff[k] = SPI.transfer(0x00);
+          }
+          digitalWrite(FLASH_CHIP_SELECT_PIN, HIGH);
+#ifdef DEBUG
+          //            for (int k = 0 ; k < SAVE_UNIT_STEP; k++) {
+          //              Serial.print(syncBuff[k], HEX);
+          //              Serial.print("|");
+          //            }
+          //            Serial.println("");
+#endif
+          syncChar.setValue(syncBuff, SAVE_UNIT_STEP);
+          delay(100);
+        }
+        resultPacket[0] = 0x02;
+        resultPacket[1] = 0x03;
+        resultPacket[2] = 0x03;
+        resultChar.setValue(resultPacket, 3);
+        bleDateTimeSycnFlag = false;
+        bleAuthCheckFlag = false;
+        bleDataSyncFlag = false;
+      }
       delay(1000);
     }
   }

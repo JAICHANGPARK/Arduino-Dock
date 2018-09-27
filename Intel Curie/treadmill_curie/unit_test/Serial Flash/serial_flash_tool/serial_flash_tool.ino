@@ -2,11 +2,11 @@
 
    CODE : JAICHANGPARK aka DREAMWALKER
    인텔 큐리 보드 사용
-   시리얼 플레시 메모리 
-   관리 툴 
-   삭제 
+   시리얼 플레시 메모리
+   관리 툴
+   삭제
    디버그
-   데이터 확인 
+   데이터 확인
 
 */
 
@@ -24,8 +24,9 @@
 
 #define INFO_ADDRESS              0x000000
 #define BASE_ADDRESS              0x001000
-#define SAVE_UNIT_STEP            16      // 메모리 저장 스탭 크기
-#define SAVE_FITNESS_BUFFER_SIZE  16      // 1단위 데이터 저장 버퍼 크기
+#define DETAIL_ADDRESS            0x00170000  // 상세 운동 정보 저장 메모리 시작 주소 
+#define SAVE_UNIT_STEP            22      // 메모리 저장 스탭 크기
+#define SAVE_FITNESS_BUFFER_SIZE  22      // 1단위 데이터 저장 버퍼 크기
 
 #define COMMAND_WRITE_ENABLE      (byte) 0x06
 #define COMMAND_RANDOM_READ       (byte)0x03
@@ -75,7 +76,8 @@ boolean bleDateTimeSycnFlag = false; // 블루투스를 통해 시간 동기화�
 boolean bleAuthCheckFlag = false; // 사용자 인증을 위한 플래그 실패시 false 성공시 true
 boolean bleDataSyncFlag = false; // 데이터 전송 요청 이 들어왔을겨우 올바른 데이터 형식이면 true 아니면 false
 
-
+boolean erasedAllFlag = false;
+boolean sFlag = false;
 
 /**
 
@@ -130,10 +132,34 @@ void setup() {
 
   Serial.print("d : "); Serial.println("메모리값 확인하기");
   Serial.print("e : "); Serial.println("메모리값 삭제하기");
-  
+
 }
 
 void loop() {
+
+  if (erasedAllFlag) {
+    memset(buf, 0, 256);
+    writeEnable();
+    allMemoryErase();
+    writeEnable();
+    n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
+    dump(buf, 256); // 읽어온 데이터를 확인하는 함수
+    erasedAllFlag = false;
+  }
+
+  if (sFlag) {
+    memset(buf, 0, 256);
+    for (int i = 0 ; i < register_index; i++) {
+      uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE]  = {0,};
+      int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+      n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 16개 데이터를 저장한다.
+      for (int k = 0 ; k < SAVE_UNIT_STEP; k ++) {
+        Serial.print(syncBuff[k], HEX);
+      }
+      Serial.println("");
+    }
+    sFlag = false;
+  }
 
 }
 
@@ -531,6 +557,15 @@ void serialEvent() {
   while (Serial.available()) {
     char inChar = (char)Serial.read();
     Serial.println(inChar);
+
+    if (inChar == 'a') {
+      Serial.println(inChar);
+      memset(buf, 0, 256);
+      writeEnable();
+      n = N25Q256_read(DETAIL_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
+      dump(buf, 256); // 읽어온 데이터를 확인하는 함수
+    }
+
     if (inChar == 'd') {
       Serial.println(inChar);
       memset(buf, 0, 256);
@@ -546,35 +581,35 @@ void serialEvent() {
       subSectorErase(INFO_ADDRESS);
       writeEnable();
       subSectorErase(BASE_ADDRESS);
-      
       writeEnable();
       n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
       dump(buf, 256); // 읽어온 데이터를 확인하는 함수
     }
 
     if (inChar == 'x') {
-      Serial.println(inChar);
-      memset(buf, 0, 256);
-      writeEnable();
-      allMemoryErase();
-      writeEnable();
-      n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
-      dump(buf, 256); // 읽어온 데이터를 확인하는 함수
+      erasedAllFlag = true;
+      //      Serial.println(inChar);
+      //      memset(buf, 0, 256);
+      //      writeEnable();
+      //      allMemoryErase();
+      //      writeEnable();
+      //      n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
+      //      dump(buf, 256); // 읽어온 데이터를 확인하는 함수
     }
 
 
     if (inChar == 's') {
-
-      //       memset(buf, 0, 256);
-      for (int i = 0 ; i < register_index; i++) {
-        uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE]  = {0,};
-        int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
-        n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 16개 데이터를 저장한다.
-        for (int k = 0 ; k < SAVE_UNIT_STEP; k ++) {
-          Serial.print(syncBuff[k], HEX);
-        }
-        Serial.println("");
-      }
+      sFlag = true;
+      //      memset(buf, 0, 256);
+      //      for (int i = 0 ; i < register_index; i++) {
+      //        uint8_t syncBuff[SAVE_FITNESS_BUFFER_SIZE]  = {0,};
+      //        int tmpAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * i);
+      //        n = N25Q256_read(tmpAddress, syncBuff, SAVE_UNIT_STEP); // buf 메모리에 읽어온 16개 데이터를 저장한다.
+      //        for (int k = 0 ; k < SAVE_UNIT_STEP; k ++) {
+      //          Serial.print(syncBuff[k], HEX);
+      //        }
+      //        Serial.println("");
+      //      }
     }
   }
 }
