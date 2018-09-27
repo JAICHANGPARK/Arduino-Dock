@@ -232,7 +232,15 @@ void setup() {
   n = N25Q256_read(BASE_ADDRESS, buf, 256); // buf 메모리에 읽어온 256개의 데이터를 저장한다.
   dump(buf, 256); // 읽어온 데이터를 확인하는 함수
 
+
+  one_shot_register_index = readOneShotIndexFromEEPROM();
+#ifdef DEBUG
+  Serial.print("상세 메모리 값 .");
+  Serial.println(one_shot_register_index);
+#endif
 }
+
+
 
 void loop() {
   BLE.poll();
@@ -266,7 +274,6 @@ void loop() {
         Serial.print("| speedNow -> "); Serial.println(speedNow);
 #endif
       }
-
       displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
 
     } else {
@@ -276,13 +283,15 @@ void loop() {
 #endif
     }
   }
-  
+
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
       // 시스템 시간 - 운동시간
       if (currentTimeIndicatorMillis - workoutTimeOneShot >= 10000) { // 1분마다 저장하는 프로세스
         //데이터 연산 처리 1분간 평균 데이터
         detachInterrupt(MAGNET_INTERRUPT_PIN);
+        uint8_t buffConuter = 0;
+        uint32_t saveOneShotAddress = DETAIL_ADDRESS + (SAVE_ONE_SHOT_UNIT_STEP * one_shot_register_index); // 원샷 저장 주소 연산
         uint8_t fitnessKind = 0x00;
         uint16_t meanOneShotDistance = (uint16_t)(uintTotalDistance - oneshot_distance);
         uint16_t meanOneShotSpeed = (uint16_t)(oneshot_speed / oneshot_count) ;
@@ -299,8 +308,6 @@ void loop() {
           fitnessKind = 0x83;
         }
 
-        uint32_t saveOneShotAddress = DETAIL_ADDRESS + (SAVE_ONE_SHOT_UNIT_STEP * one_shot_register_index); // 원샷 저장 주소 연산
-        
 #ifdef DEBUG
         Serial.println("---On Shot ! -----------------------------------------------" );
         Serial.print("oneshot_count ->  " ); Serial.print(oneshot_count);
@@ -314,6 +321,19 @@ void loop() {
         Serial.print("| workoutTimeOneShot --> " ); Serial.println(workoutTimeOneShot);
         Serial.println("----------------------------------------------------------------" );
 #endif
+        uint8_t oneShotfitnessDataBuff[SAVE_ONE_SHOT_BUFFER_SIZE]; // 상세 운동정보 저장을 위한 원샷 버퍼
+
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)((register_index >> 8) & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)(register_index & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (fitnessKind & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)((meanOneShotSpeed >> 8) & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)(meanOneShotSpeed & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)((meanOneShotDistance >> 8) & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (uint8_t)(meanOneShotDistance & 0xff);
+        oneShotfitnessDataBuff[buffConuter++] = (meanOneShotHeartRate & 0xff);
+
+
+
         // 초기화 및 변수 저장
         one_shot_register_index++;
         oneshot_count = 0;
@@ -389,6 +409,8 @@ void loop() {
         writeEnable();  // 운동량 정보 쓰기
         writeFitnessData(fitnessDataBuff, saveAddress, SAVE_UNIT_STEP); // 운동량 정보 쓰기
 
+
+
 #ifdef DEBUG
         Serial.print("저장 주소 --> ");  Serial.print("0x"); Serial.println(saveAddress, HEX);
         Serial.print("인덱스 --> "); Serial.print((uint8_t)((register_index >> 8) & 0xff), HEX); Serial.println((uint8_t)(register_index & 0xff), HEX); //2바이트
@@ -411,6 +433,11 @@ void loop() {
 #endif
         register_index++;
         buffCount = 0;
+
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 24) & 0xff);
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 16) & 0xff);
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 8) & 0xff);
+        EEPROM.update(buffCount++,  (uint8_t)(one_shot_register_index & 0xff));
 
         //시스템변수 초기화
         count = 0;
@@ -518,6 +545,15 @@ void loop() {
 
   checkTFTDisplay(&currentTimeIndicatorMillis);
 
+}
+
+uint32_t readOneShotIndexFromEEPROM() {
+  uint8_t tmp_reg_buff[4] = {0,};
+  uint32_t index = 0;
+  for (int i = 0; i < 4 ; i++) {
+    tmp_reg_buff[i] =  EEPROM.read(i);
+  }
+  one_shot_register_index = (((tmp_reg_buff[0] << 24 ) & 0xff000000) | ((tmp_reg_buff[1] << 16 ) & 0x00ff0000) | ((tmp_reg_buff[2] << 8 ) & 0x0000ff00) | ((tmp_reg_buff[3] & 0xff)));
 }
 
 void rfid_address_read() {
