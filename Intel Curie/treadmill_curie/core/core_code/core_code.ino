@@ -88,11 +88,10 @@ volatile uint32_t uintTotalDistance = 0;
 
 volatile float roundSpeed = 0.0f;    // 반올림한 속도 변수 저장 .
 
-
 /**********One Shot Workout Variables *****************************/
 volatile uint16_t oneshot_count = 0;          // 인터럽트 클럭 카운트 수
-volatile uint16_t oneshot_speed = 0;
-volatile uint16_t oneshot_distance = 0;
+volatile uint32_t oneshot_speed = 0;
+volatile uint32_t oneshot_distance = 0;
 volatile uint16_t oneshot_heartRate = 0;
 
 /*************** 평균 운동량 정보 처리 변수    ****************************/
@@ -175,7 +174,6 @@ void interrupt_func();
 extern BLECharacteristic indorBikeChar;
 extern BLECharacteristic treadmillChar;
 extern BLECharacteristic heartRateMeansurement;
-
 
 void setup() {
 
@@ -276,22 +274,28 @@ void loop() {
       // 시스템 시간 - 운동시간
       if (currentTimeIndicatorMillis - workoutTimeOneShot >= 60000) { // 1분마다 저장하는 프로세스
 
-        uint16_t meanOneShotDistance = sumDistanceKm - oneshot_distance;
-        uint16_t meanOneShotSpeed = oneshot_speed / oneshot_count ;
+        uint32_t meanOneShotDistance = uintTotalDistance - oneshot_distance;
+        uint32_t meanOneShotSpeed = oneshot_speed / oneshot_count ;
         uint8_t meanOneShotHeartRate =  (uint8_t) (sumHeartRate / heartRateCount);  // 평균 심박수 연산
-
+        
 #ifdef DEBUG
-        Serial.println("On Shot ! ---------------------" );
-        Serial.print("meanOneShotDistance ->  " ); Serial.print(meanOneShotDistance);
+        Serial.println("---On Shot ! ---------------------" );
+        Serial.print("oneshot_count ->  " ); Serial.print(oneshot_count);
+        Serial.print("| uintSpeedNow ->  " ); Serial.print(uintSpeedNow);
+        Serial.print("| oneshot_speed ->  " ); Serial.print(oneshot_speed);
+        
+        Serial.print("| uintTotalDistance ->  " ); Serial.print(uintTotalDistance);
+        Serial.print("| oneshot_distance ->  " ); Serial.print(oneshot_distance);
+        Serial.print("| meanOneShotDistance ->  " ); Serial.print(meanOneShotDistance);
         Serial.print("| meanOneShotSpeed --> " ); Serial.print(meanOneShotSpeed);
         Serial.print("| currentTimeIndicatorMillis --> " ); Serial.print(currentTimeIndicatorMillis);
-        Serial.print("| workoutTimeOneShot --> " ); Serial.print(workoutTimeOneShot);
-
+        Serial.print("| workoutTimeOneShot --> " ); Serial.println(workoutTimeOneShot);
+        Serial.println("--------------------------------" );
 #endif
 
         oneshot_count = 0;
         oneshot_speed = 0;
-        oneshot_distance = sumDistanceKm;
+        oneshot_distance = uintTotalDistance;
         workoutTimeOneShot = currentTimeIndicatorMillis;  // 과거 시스템 시간 변수를 운동 시간 변수에 넣는다.
 
       }

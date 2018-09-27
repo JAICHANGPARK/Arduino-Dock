@@ -15,9 +15,9 @@ void interrupt_func() {
 #ifdef TREADMILL
   long interrupt_time = millis(); // 인터럽트가 발생한 시간을 저장(시스템이 부팅된 이후의 시간을 저장 인터럽트가 발생할때마다 이전 값 보다 크다.)
 
-  if ( interrupt_time - t >  10 ) { // 값이 튀는 현상을 잡기위해 시10ms 이하의 신호는 Pass
+  if ( interrupt_time - t >  15 ) { // 값이 튀는 현상을 잡기위해 시10ms 이하의 신호는 Pass
     count++; //자계 센서로 부터 외부인터럽트가 발생하면 1씩 증가시키도록
-    oneshot_count++;  // 원샷 카운트 변수 
+    oneshot_count++;  // 원샷 카운트 변수
     distance = (TREADMILL_DISTANCE * count); // 총 이동 거리 --> 단위 넣을것 [계속 증가할것]
     distanceUnitKm = distance / 1000.0f; // 단위 km
 
@@ -35,14 +35,13 @@ void interrupt_func() {
 
     float tmpRoundSpeed  = round(speedNow * 10.0f);
     roundSpeed = tmpRoundSpeed / 10.0;  // 소수 2째 자리 반올림.
-    // 100을 곱해야한느데 
+    // 100을 곱해야한느데
 
     //평균 구하기위한 더하기 연산
     sumSpeed += roundSpeed;   //속도 합 (실내자전거와 드르게 반올림된 속도값을 저장한다.)
     sumDistanceKm += uintDistanceKm; // 거리합 km를 100 곱한 값 uintDistanceKm는 100 곱해진 km 거리 값이다.
 
     oneshot_speed += uintSpeedNow;
-    
 
     t = millis(); //시간 저장
 
