@@ -12,6 +12,9 @@
 
 #include <CurieTime.h>
 #include <CurieBLE.h>
+
+#include <EEPROM.h>
+
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <Wire.h>
@@ -48,6 +51,9 @@
 
 #define SAVE_UNIT_STEP                22      // 메모리 저장 스탭 크기
 #define SAVE_FITNESS_BUFFER_SIZE      22      // 1단위 데이터 저장 버퍼 크기
+
+#define SAVE_ONE_SHOT_UNIT_STEP        8      // 1단위 원샷 메모리 저장 스탭 크기
+#define SAVE_ONE_SHOT_BUFFER_SIZE      8      // 1단위 원샷 데이터 저장 버퍼 크기
 
 /*************** Serial Flash Macro   ****************************/
 #define COMMAND_WRITE_ENABLE          (byte)0x06
@@ -89,6 +95,7 @@ volatile uint32_t uintTotalDistance = 0;
 volatile float roundSpeed = 0.0f;    // 반올림한 속도 변수 저장 .
 
 /**********One Shot Workout Variables *****************************/
+
 volatile uint16_t oneshot_count = 0;          // 인터럽트 클럭 카운트 수
 volatile uint32_t oneshot_speed = 0;
 volatile uint32_t oneshot_distance = 0;
@@ -147,13 +154,14 @@ uint8_t authData[] = {0x00, 0x00, 0x00};     // 결과 값 반환 패킷 데이�
 uint8_t resultPacket[] = {0x00, 0x00, 0x00}; // 결과 값 반환 패킷 데이터 버퍼
 
 /*****시리얼 플레시 메모리 ****************************/
+uint16_t register_index = 0;  // 저장 인덱스 총괄
+uint32_t one_shot_register_index = 0;  // 원샷 저장 인덱스 총괄
 int device_id, addr, data, i = 0;
 uint8_t page[256] = {0,};
 uint8_t buf[256]  = {0,};
 uint8_t init_buff[16] = {0,};
 uint8_t w_data[16] = {0,};
 uint16_t n = 0;
-uint16_t register_index = 0;  // 저장 인덱스 총괄
 uint32_t base_address = 0;
 uint32_t now_address = 0;
 
@@ -266,40 +274,54 @@ void loop() {
 #ifdef DEBUG
       Serial.println("블루투스 연결은 되어 있지만 운동 중이지 않습니다.");
 #endif
-
     }
   }
+  
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
       // 시스템 시간 - 운동시간
-      if (currentTimeIndicatorMillis - workoutTimeOneShot >= 60000) { // 1분마다 저장하는 프로세스
-
-        uint32_t meanOneShotDistance = uintTotalDistance - oneshot_distance;
-        uint32_t meanOneShotSpeed = oneshot_speed / oneshot_count ;
+      if (currentTimeIndicatorMillis - workoutTimeOneShot >= 10000) { // 1분마다 저장하는 프로세스
+        //데이터 연산 처리 1분간 평균 데이터
+        detachInterrupt(MAGNET_INTERRUPT_PIN);
+        uint8_t fitnessKind = 0x00;
+        uint16_t meanOneShotDistance = (uint16_t)(uintTotalDistance - oneshot_distance);
+        uint16_t meanOneShotSpeed = (uint16_t)(oneshot_speed / oneshot_count) ;
         uint8_t meanOneShotHeartRate =  (uint8_t) (sumHeartRate / heartRateCount);  // 평균 심박수 연산
+
+        // 데이터 저장 처리
+        if (0 < meanOneShotSpeed && meanOneShotSpeed <= 300) { // 가벼운 걸음
+          fitnessKind = 0x80;
+        } else if (300 < meanOneShotSpeed && meanOneShotSpeed <= 600) { // 일반 걸음
+          fitnessKind = 0x81;
+        } else if (600 < meanOneShotSpeed && meanOneShotSpeed <= 700) { // 빠른 걸음 혹은 달리기
+          fitnessKind = 0x82;
+        } else if (700 < meanOneShotSpeed && meanOneShotSpeed <= 1600) { //달리기
+          fitnessKind = 0x83;
+        }
+
+        uint32_t saveOneShotAddress = DETAIL_ADDRESS + (SAVE_ONE_SHOT_UNIT_STEP * one_shot_register_index); // 원샷 저장 주소 연산
         
 #ifdef DEBUG
-        Serial.println("---On Shot ! ---------------------" );
+        Serial.println("---On Shot ! -----------------------------------------------" );
         Serial.print("oneshot_count ->  " ); Serial.print(oneshot_count);
-        Serial.print("| uintSpeedNow ->  " ); Serial.print(uintSpeedNow);
-        Serial.print("| oneshot_speed ->  " ); Serial.print(oneshot_speed);
-        
-        Serial.print("| uintTotalDistance ->  " ); Serial.print(uintTotalDistance);
-        Serial.print("| oneshot_distance ->  " ); Serial.print(oneshot_distance);
+        Serial.print("| one_shot_register_index --> " ); Serial.print(one_shot_register_index);
+        Serial.print("| saveOneShotAddress --> " ); Serial.print(saveOneShotAddress, HEX);
+        Serial.print("| register_index --> " ); Serial.print(register_index);
+        Serial.print("| fitnessKind --> " ); Serial.print(fitnessKind);
         Serial.print("| meanOneShotDistance ->  " ); Serial.print(meanOneShotDistance);
         Serial.print("| meanOneShotSpeed --> " ); Serial.print(meanOneShotSpeed);
         Serial.print("| currentTimeIndicatorMillis --> " ); Serial.print(currentTimeIndicatorMillis);
         Serial.print("| workoutTimeOneShot --> " ); Serial.println(workoutTimeOneShot);
-        Serial.println("--------------------------------" );
+        Serial.println("----------------------------------------------------------------" );
 #endif
-
+        // 초기화 및 변수 저장
+        one_shot_register_index++;
         oneshot_count = 0;
         oneshot_speed = 0;
         oneshot_distance = uintTotalDistance;
         workoutTimeOneShot = currentTimeIndicatorMillis;  // 과거 시스템 시간 변수를 운동 시간 변수에 넣는다.
-
+        attachInterrupt(MAGNET_INTERRUPT_PIN, interrupt_func, FALLING);  // 인터럽트를 풀고 다시 붙이는 작업을 진행했는데 데이터 오차가 발생할 수 있으니 검증하고 수정하길 바람
       }
-
 
       if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {//500 ms 이상 인터럽트 발생 없다면 운동  종료 처리 !
 
