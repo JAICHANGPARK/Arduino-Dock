@@ -1,10 +1,10 @@
 /*
       made by : JAICHANGPARK aka DREAMWALKER
       인텔 큐리 보드 사용(32비트 쿼크 코어)
-      
-      당뇨병 환자를 위한 운동부하기 자동기록 모듈 
+
+      당뇨병 환자를 위한 운동부하기 자동기록 모듈
       트레드밀 (KNU TM0)
-      
+
       1. 최종 제작시에는 DEBUG 메그로는 주석처리 하세요.
       2. 트레드밀 적용시 INDOOR_BIKE 메크로는 주석 처리 하세요
       3. 운동 파리미터 저장 메모리 주소는 메크로에 표기되어있습니다.
@@ -88,6 +88,13 @@ volatile uint32_t uintTotalDistance = 0;
 
 volatile float roundSpeed = 0.0f;    // 반올림한 속도 변수 저장 .
 
+
+/**********One Shot Workout Variables *****************************/
+volatile uint16_t oneshot_count = 0;          // 인터럽트 클럭 카운트 수
+volatile uint16_t oneshot_speed = 0;
+volatile uint16_t oneshot_distance = 0;
+volatile uint16_t oneshot_heartRate = 0;
+
 /*************** 평균 운동량 정보 처리 변수    ****************************/
 volatile uint16_t uintDistanceKm = 0;
 volatile uint32_t sumDistanceKm = 0x0000;  // 평균을 구하기 위한 이동거리 변수 ( 더 해짐)
@@ -105,6 +112,7 @@ volatile int diffTime = 0.0f;         // 인터럽트 발생 시간 차를 구�
 volatile long startFitnessTime = 0;   // 운동 시작 시간 저장 변수 ( 1회 저장된다) 운동종료시 초기화 필요
 volatile long endFitnessTime = 0;     // 운동 종료 시간 변수  : 운동 종료시 초기화 필요
 volatile long workoutTime = 0;        // 운동 시간 계산 변수  : 운동 종료시 초기화 필요
+volatile long workoutTimeOneShot = 0; // 1분마다 운동 시간 저장 위해 시간 변수 생성
 
 long tftTimeIndex = 0;                // 디스플레이 변경을 위한 시간 변수
 long saveMinTime = 0;                 // 임의 시간 인터럽트 해제를 위한 시간 변수 (카운트 계수에 사용된다)
@@ -222,8 +230,9 @@ void setup() {
 
 void loop() {
   BLE.poll();
-  
+
   long currentTimeIndicatorMillis = millis();
+  //  long oneMinuteShotMiliis = millis(); // 1분마다 저장하기 위해
 
   if (deviceConnectedFlag) {      // 블루투스 연결은 되어 있는 상태
     if (fitnessStartOrEndFlag) { // 블루투스 연결은 되어 있는 상태에서 운동 중일 때만 실시간 전송이 되도록
@@ -250,7 +259,6 @@ void loop() {
         Serial.print("| InstantTime -> "); Serial.print(InstantTime);
         Serial.print("| speedNow -> "); Serial.println(speedNow);
 #endif
-
       }
 
       displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
@@ -265,6 +273,30 @@ void loop() {
   }
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
+      // 시스템 시간 - 운동시간
+      if (currentTimeIndicatorMillis - workoutTimeOneShot >= 60000) { // 1분마다 저장하는 프로세스
+
+        uint16_t meanOneShotDistance = sumDistanceKm - oneshot_distance;
+        uint16_t meanOneShotSpeed = oneshot_speed / oneshot_count ;
+        uint8_t meanOneShotHeartRate =  (uint8_t) (sumHeartRate / heartRateCount);  // 평균 심박수 연산
+
+#ifdef DEBUG
+        Serial.println("On Shot ! ---------------------" );
+        Serial.print("meanOneShotDistance ->  " ); Serial.print(meanOneShotDistance);
+        Serial.print("| meanOneShotSpeed --> " ); Serial.print(meanOneShotSpeed);
+        Serial.print("| currentTimeIndicatorMillis --> " ); Serial.print(currentTimeIndicatorMillis);
+        Serial.print("| workoutTimeOneShot --> " ); Serial.print(workoutTimeOneShot);
+
+#endif
+
+        oneshot_count = 0;
+        oneshot_speed = 0;
+        oneshot_distance = sumDistanceKm;
+        workoutTimeOneShot = currentTimeIndicatorMillis;  // 과거 시스템 시간 변수를 운동 시간 변수에 넣는다.
+
+      }
+
+
       if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {//500 ms 이상 인터럽트 발생 없다면 운동  종료 처리 !
 
         /****************************************
@@ -337,7 +369,7 @@ void loop() {
         Serial.print("저장 시간 --> "); Serial.print((uint8_t)((saveYear >> 8) & 0xff), HEX); Serial.println((uint8_t)(saveYear & 0xff), HEX); //2바이트
         Serial.print("사용자 정보 태그 --> ");
         for (int i = 0; i < 4 ; i ++) { //사용자 태그 정보 초기화
-          Serial.print(nuidPICC[i],HEX);
+          Serial.print(nuidPICC[i], HEX);
         }
         Serial.println("");
         Serial.print(saveMonth, HEX); //1바이트
@@ -394,6 +426,8 @@ void loop() {
         Serial.print("| InstantTime -> "); Serial.print(InstantTime);
         Serial.print("| speedNow -> "); Serial.print(speedNow);
         Serial.print("| roundSpeed -> "); Serial.println(roundSpeed);
+        Serial.print("| currentTimeIndicatorMillis -> "); Serial.print(currentTimeIndicatorMillis);
+        Serial.print("| workoutTimeOneShot -> "); Serial.println(workoutTimeOneShot);
 #endif
       }
 
@@ -648,7 +682,7 @@ void tftPrintHeartRate() { //심박수 디스플레이 함수
 /**
    사용자 테그 체크 디스플레이
    테그 체크가 되었다면 테그 고유 주소를 디스플레이하며
-   그렇지 않은 경우는 테그를 찍어달라는 권유 메세지 
+   그렇지 않은 경우는 테그를 찍어달라는 권유 메세지
 */
 void tftPrintCheckUser() {
 
@@ -732,8 +766,8 @@ void tftPrintWorkoutTime() {
 
 
 /**************************************************************
- * 블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
- * 
+   블루투스가 연결되고 실시간 전송 시 심박 수 처리 함수 - 박제창
+
  *************************************************************/
 void updateHeartRateLevel() {
   /* Read the current voltage level on the A0 analog input pin.
