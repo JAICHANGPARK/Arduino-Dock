@@ -32,10 +32,8 @@ void interrupt_func() {
 
     workoutTime = interrupt_time - startFitnessTime; //(운동 시간 <-- 현재 시스템 인터럽트 발생 시간 - 운동 시작 시간 )
 
-
     float tmpRoundSpeed  = round(speedNow * 10.0f);
-    roundSpeed = tmpRoundSpeed / 10.0;  // 소수 2째 자리 반올림.
-    // 100을 곱해야한느데
+    roundSpeed = tmpRoundSpeed / 10.0;  // 소수 2째 자리 반올림. 100을 곱해야한느데
 
     //평균 구하기위한 더하기 연산
     sumSpeed += roundSpeed;   //속도 합 (실내자전거와 드르게 반올림된 속도값을 저장한다.)

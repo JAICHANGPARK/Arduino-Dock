@@ -299,6 +299,7 @@ void loop() {
 #ifdef DEBUG
       Serial.println("블루투스 연결은 되어 있지만 운동 중이지 않습니다.");
 #endif
+//상황처리 필요 --> 불루투스 연결 중일때 운동중이다가 종료했을때 운동종료 처리 필요
     }
   }
 
@@ -499,6 +500,7 @@ void loop() {
         Serial.print("| speedNow -> "); Serial.print(speedNow);
         Serial.print("| roundSpeed -> "); Serial.println(roundSpeed);
         Serial.print("| currentTimeIndicatorMillis -> "); Serial.print(currentTimeIndicatorMillis);
+        Serial.print("| t -> "); Serial.print(t);
         Serial.print("| workoutTimeOneShot -> "); Serial.println(workoutTimeOneShot);
 #endif
       }
