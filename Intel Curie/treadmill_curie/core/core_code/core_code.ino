@@ -292,21 +292,181 @@ void loop() {
         Serial.print("| speedNow -> "); Serial.println(speedNow);
 #endif
       }
+
+      if (currentTimeIndicatorMillis - t >= WORKOUT_DONE_TIME_MILLIS) {//500 ms 이상 인터럽트 발생 없다면 운동  종료 처리 !
+
+        /****************************************
+           운동 종료 데이터 저장 처리
+         ***************************************/
+        uint16_t saveYear = year();   //년
+        uint8_t saveMonth = month();  //월
+        uint8_t saveDay = day();      //일
+        uint8_t saveHour = hour();    //시
+        uint8_t saveMin = minute();   //분
+        uint8_t saveSecond = second(); // 초
+        uint16_t meanSpeed = sumSpeed / count; //카운트 수를 기준으로 평균 운동 기록 연산
+        int tmpTime = (int)(workoutTime / 1000.0f); // ms --> s 로 변환
+        uint16_t saveWorkoutTime = (uint16_t)tmpTime; //운동 시간 변수
+        // 이동 거리는 --> uintDistanceKm 변수 사용
+
+        uint8_t meanHeartRate =  (uint8_t) (sumHeartRate / heartRateCount);  // 평균 심박수 연산
+        uint32_t saveAddress = BASE_ADDRESS + (SAVE_UNIT_STEP * register_index); // 저장 주소 연산
+        uint16_t meanKcal = 0;    //소모 열량 변수 defualt : 0
+
+        writeEnable();       //서브섹터 삭제하기
+        subSectorErase(INFO_ADDRESS); //서브섹터 삭제하기
+#ifdef DEBUG
+        Serial.print("sr check: " ); Serial.println(readStatusRegister());
+        Serial.println("after the subsector is erased");
+#endif
+
+        int buffCount = 0;
+        uint8_t save_info_index[6];  // 인덱스 저장을 위한 버퍼
+        uint8_t fitnessDataBuff[SAVE_FITNESS_BUFFER_SIZE]; // 운동정보 저장을 위한 버퍼
+        save_info_index[buffCount++] = (uint8_t)((register_index >> 8) & 0xff);
+        save_info_index[buffCount++] = (uint8_t)(register_index & 0xff);
+        save_info_index[buffCount++] =  (uint8_t)((saveAddress >> 24) & 0xff);
+        save_info_index[buffCount++] =  (uint8_t)((saveAddress >> 16) & 0xff);
+        save_info_index[buffCount++] =  (uint8_t)((saveAddress >> 8) & 0xff);
+        save_info_index[buffCount++] = (uint8_t)(saveAddress & 0xff);
+        writeEnable();
+        writeInfoIndex(save_info_index, INFO_ADDRESS);
+        buffCount = 0;
+
+        fitnessDataBuff[buffCount++] = (uint8_t)((register_index >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(register_index & 0xff);
+        fitnessDataBuff[buffCount++] = nuidPICC[0];
+        fitnessDataBuff[buffCount++] = nuidPICC[1];
+        fitnessDataBuff[buffCount++] = nuidPICC[2];
+        fitnessDataBuff[buffCount++] = nuidPICC[3];
+        fitnessDataBuff[buffCount++] = (uint8_t)((saveYear >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(saveYear & 0xff);
+        fitnessDataBuff[buffCount++] = saveMonth & 0xff;
+        fitnessDataBuff[buffCount++] = saveDay & 0xff;
+        fitnessDataBuff[buffCount++] = saveHour & 0xff;
+        fitnessDataBuff[buffCount++] = saveMin & 0xff;
+        fitnessDataBuff[buffCount++] = saveSecond & 0xff;
+        fitnessDataBuff[buffCount++] = (uint8_t)((saveWorkoutTime >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(saveWorkoutTime & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)((meanSpeed >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(meanSpeed & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)((uintDistanceKm >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(uintDistanceKm & 0xff);
+        fitnessDataBuff[buffCount++] = meanHeartRate & 0xff;
+        fitnessDataBuff[buffCount++] = (uint8_t)((meanKcal >> 8) & 0xff);
+        fitnessDataBuff[buffCount++] = (uint8_t)(meanKcal & 0xff);
+
+        writeEnable();  // 운동량 정보 쓰기
+        writeFitnessData(fitnessDataBuff, saveAddress, SAVE_UNIT_STEP); // 운동량 정보 쓰기
+
+#ifdef DEBUG
+        Serial.print("저장 주소 --> ");  Serial.print("0x"); Serial.println(saveAddress, HEX);
+        Serial.print("인덱스 --> "); Serial.print((uint8_t)((register_index >> 8) & 0xff), HEX); Serial.println((uint8_t)(register_index & 0xff), HEX); //2바이트
+        Serial.print("저장 시간 --> "); Serial.print((uint8_t)((saveYear >> 8) & 0xff), HEX); Serial.println((uint8_t)(saveYear & 0xff), HEX); //2바이트
+        Serial.print("사용자 정보 태그 --> ");
+        for (int i = 0; i < 4 ; i ++) { //사용자 태그 정보 초기화
+          Serial.print(nuidPICC[i], HEX);
+        }
+        Serial.println("");
+        Serial.print(saveMonth, HEX); //1바이트
+        Serial.print(saveDay, HEX);   //1바이트
+        Serial.print(saveHour, HEX);  //1바이트
+        Serial.print(saveMin, HEX);   //1바이트
+        Serial.println(saveSecond, HEX); //1바이트
+        Serial.print("운동시간 --> "); Serial.println(saveWorkoutTime); // 2바이트
+        Serial.print("평균 속도 --> "); Serial.println(meanSpeed); // 2바이트
+        Serial.print("총 운동 거리 --> "); Serial.println(uintDistanceKm);  // 2바이트
+        Serial.print("평균 심박수 --> "); Serial.println(meanHeartRate);  //1바이트
+        Serial.print("소모 열량 --> "); Serial.println(0); //2바이트
+#endif
+        register_index++;
+        buffCount = 0;
+
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 24) & 0xff);
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 16) & 0xff);
+        EEPROM.update(buffCount++, (uint8_t)(one_shot_register_index >> 8) & 0xff);
+        EEPROM.update(buffCount++,  (uint8_t)(one_shot_register_index & 0xff));
+
+        //시스템변수 초기화
+        count = 0;
+        t = 0;
+        distance = 0;
+        distanceUnitKm = 0;
+        startFitnessTime = 0;
+        endFitnessTime = 0;
+        sumSpeed = 0;
+        workoutTime = 0;
+        uintDistanceKm = 0;
+        sumDistanceKm = 0x0000;
+        sumSpeed = 0x0000;
+        sumHeartRate = 0;
+
+        for (int i = 0; i < 4 ; i ++) { //사용자 태그 정보 초기화
+          nuidPICC[i] = 0xff;
+        }
+
+        // 시스템 플레그 초기화
+        fitnessStartOrEndFlag = false;  //운동 종료 스위치
+        userRFIDCheckFlag = false;
+
+#ifdef DEBUG
+        Serial.println("운동종료");
+#endif
+        // 시스템 디스플레이 종료 안내
+        workoutDoneDisplay();// 운동 종료 표시해주기
+        delay(3000);
+        initTFTDisplay(); // 디스플레이 초기화
+
+      } else { //블루투스 연결되어 있지 않지만 운동중입니다.
+#ifdef DEBUG
+        Serial.println("블루투스 연결되어 있지 않지만 운동중입니다.");
+        Serial.print("count -> "); Serial.print(count);
+        Serial.print("| distance -> "); Serial.print(distance);
+        Serial.print("| distanceUnitKm -> "); Serial.print(distanceUnitKm);
+        Serial.print("| diffTime -> "); Serial.print(diffTime);
+        Serial.print("| InstantTime -> "); Serial.print(InstantTime);
+        Serial.print("| speedNow -> "); Serial.print(speedNow);
+        Serial.print("| roundSpeed -> "); Serial.println(roundSpeed);
+        Serial.print("| currentTimeIndicatorMillis -> "); Serial.print(currentTimeIndicatorMillis);
+        Serial.print("| t -> "); Serial.print(t);
+        Serial.print("| workoutTimeOneShot -> "); Serial.println(workoutTimeOneShot);
+#endif
+      }
+
+      unsigned char hr_realtime = readHeartRate(HR_ADDR);
+      if (hr_realtime == 0) {
+        heartRateMeasureFlag = false;
+        heartRateLocationFlag = false;
+      } else if (hr_realtime > 0 && hr_realtime < 60) {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = false;
+      } else {
+        heartRateMeasureFlag = true;
+        heartRateLocationFlag = true;
+        globalHeartRate = hr_realtime;
+        // 심박수 카운트 업 , 심박수 평균을 위한 더하기 수행 --> 운동 종료시 초기화 될 변수
+        heartRateCount++;
+        sumHeartRate += globalHeartRate;
+      }
+      delay(500);
       displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
 
-    } else {
-      //블루투스 연결은 되어 있지만 운동중이지 않을때 { == 운동 종료 상태일때)
+
+      //      displaySet(&currentTimeIndicatorMillis); // 디스플레이 설정
+
+    } else {//블루투스 연결은 되어 있지만 운동중이지 않을때 { == 운동 종료 상태일때)
 #ifdef DEBUG
       Serial.println("블루투스 연결은 되어 있지만 운동 중이지 않습니다.");
 #endif
-//상황처리 필요 --> 불루투스 연결 중일때 운동중이다가 종료했을때 운동종료 처리 필요
+      //상황처리 필요 --> 불루투스 연결 중일때 운동중이다가 종료했을때 운동종료 처리 필요
     }
+
   }
 
   else {  //블루투스 연결되어 있지 않은 상태이면
     if (fitnessStartOrEndFlag) { //블루투스 연결되어 있지 않은 상태에서 운동 중이라면
 
-      if (currentTimeIndicatorMillis - workoutTimeOneShot >= ONE_MINUTE) { // 1분마다 저장하는 원샷 프로세스 
+      if (currentTimeIndicatorMillis - workoutTimeOneShot >= ONE_MINUTE) { // 1분마다 저장하는 원샷 프로세스
         //데이터 연산 처리 1분간 평균 데이터
         detachInterrupt(MAGNET_INTERRUPT_PIN);
         uint8_t buffConuter = 0;
@@ -428,8 +588,6 @@ void loop() {
 
         writeEnable();  // 운동량 정보 쓰기
         writeFitnessData(fitnessDataBuff, saveAddress, SAVE_UNIT_STEP); // 운동량 정보 쓰기
-
-
 
 #ifdef DEBUG
         Serial.print("저장 주소 --> ");  Serial.print("0x"); Serial.println(saveAddress, HEX);
