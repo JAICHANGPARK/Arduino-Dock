@@ -124,7 +124,8 @@ boolean bleDateTimeSycnFlag = false; // 블루투스를 통해 시간 동기화�
 boolean bleAuthCheckFlag = false; // 사용자 인증을 위한 플래그 실패시 false 성공시 true
 boolean bleDataSyncFlag = false; // 데이터 전송 요청 이 들어왔을겨우 올바른 데이터 형식이면 true 아니면 false
 
-int hr_cnt = 0;
+volatile int hr_cnt = 0;
+volatile uint8_t hr_real_time = 0;
 bool toggle = 0;                    // The LED status toggle
 bool toggle1 = 0;
 
@@ -141,6 +142,7 @@ void timedBlinkIsr2()   // callback function when interrupt is asserted
   toggle1 = !toggle1;  // use NOT operator to invert toggle value
   hr_cnt = hr_cnt * 6;
   Serial.println( hr_cnt);
+  hr_real_time = hr_cnt;
   hr_cnt = 0;
 }
 
@@ -626,7 +628,12 @@ void updateHeartRate() {
   /* Read the current voltage level on the A0 analog input pin.
      This is used here to simulate the charge level of a battery.
   */
-  unsigned char hr = (unsigned char)hr_cnt;
+  unsigned char hr = 0x00;
+  if (hr_real_time == 0) {
+    hr = 0xFF;
+  } else {
+    hr = hr_real_time;
+  }
   heartRateData[1] = hr;
   heartRateMeansurement.setValue(heartRateData, 2);
 
