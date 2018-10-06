@@ -245,8 +245,8 @@ void displayPhaseFirst() {
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
   display.println("Distance");
-  String message = String(distanceUnitKm) + " km";
-  display.setTextSize(2);
+  String message = String(distanceUnitKm) + "km";
+  display.setTextSize(1);
   display.setTextColor(WHITE);
   display.println(message);
   display.display();
@@ -259,9 +259,9 @@ void displayPhaseSecond() {
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
   display.println("Speed");
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  String message = String(speedNow) + " km/h";
+//  display.setTextSize(1);
+//  display.setTextColor(WHITE);
+  String message = String(speedNow) + "km/h";
   display.println(message);
   display.display();
 }
@@ -272,11 +272,11 @@ void displayPhaseThird() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
-  display.println("Fitness Time");
-  display.setTextSize(2);
+  display.println("FitnessTime");
+  display.setTextSize(1);
   display.setTextColor(WHITE);
   int tmp_time = (int)(workoutTime / 1000.0f); // 운동 시간 연산하기
-  String message = String(tmp_time) + " [s]";
+  String message = String(tmp_time) + "[s]";
   display.println(message);
   display.display();
 }
@@ -288,7 +288,7 @@ void displayPhaseFour() {
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
   display.println("HeartRate");
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(WHITE);
 
   //  boolean heartRateMeasureFlag = false;
